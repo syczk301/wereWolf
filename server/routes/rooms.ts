@@ -1,6 +1,6 @@
-import { Router, type Response } from 'express'
+import { Router, type Response, type Request } from 'express'
 import { z } from 'zod'
-import { roomService } from '../services/roomService.js'
+import { roomService } from '../../api/services/roomService.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 
@@ -8,7 +8,7 @@ const router = Router()
 
 router.get(
   '/',
-  asyncHandler(async (req: AuthedRequest, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const rooms = await roomService.listRooms()
     res.status(200).json({ success: true, rooms })
   }),
@@ -16,7 +16,8 @@ router.get(
 
 router.post(
   '/',
-  asyncHandler(async (req: AuthedRequest, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as AuthedRequest
     const schema = z.object({
       name: z.string().optional(),
       maxPlayers: z.number().int().min(4).max(20),
@@ -27,12 +28,17 @@ router.post(
       return
     }
 
-    const room = await roomService.createRoom(req.user.id, parsed.data.name ?? '', parsed.data.maxPlayers)
+    const room = await roomService.createRoom(
+      authReq.user.id,
+      authReq.user.nickname,
+      parsed.data.name ?? '',
+      parsed.data.maxPlayers,
+    )
     res.status(200).json({ success: true, room })
   }),
 )
 
-router.get('/:roomId', async (req: AuthedRequest, res: Response) => {
+router.get('/:roomId', async (req: Request, res: Response) => {
   try {
     const room = await roomService.getRoomState(req.params.roomId)
     res.status(200).json({ success: true, room })

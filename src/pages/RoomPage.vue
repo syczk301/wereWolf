@@ -16,6 +16,7 @@ const connected = ref(false)
 const joining = ref(false)
 
 const chatText = ref('')
+const chatChannel = ref<'public' | 'wolf'>('public')
 
 const isOwner = computed(() => {
   if (!room.roomState || !session.user) return false
@@ -82,7 +83,7 @@ function sendChat() {
   if (!socket.value) return
   const text = chatText.value.trim()
   if (!text) return
-  socket.value.emit('chat:send', { roomId: roomId.value, text })
+  socket.value.emit('chat:send', { roomId: roomId.value, text, channel: chatChannel.value })
   chatText.value = ''
 }
 
@@ -112,6 +113,11 @@ function setupSocketListeners(s: any) {
 
 async function join() {
   if (joining.value) return
+  // If we already have state matching this room, show as connected
+  if (room.roomState && room.roomState.id === roomId.value) {
+    connected.value = true
+  }
+  
   joining.value = true
   try {
     const s = connect()
@@ -448,16 +454,36 @@ onUnmounted(() => {
             <div class="mb-2 text-sm font-medium">发言与聊天</div>
             <div class="mb-3 max-h-44 space-y-2 overflow-auto pr-1">
               <div v-for="m in room.chat" :key="m.id" class="text-xs text-white/70">
+                <span v-if="(m as any).channel === 'wolf'" class="mr-1 rounded bg-red-900/50 px-1 text-[10px] text-red-300">狼队</span>
                 <span class="text-white/90">{{ m.sender.nickname }}：</span>{{ m.text }}
               </div>
             </div>
-            <div class="flex gap-2">
-              <input
-                v-model="chatText"
-                class="flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-white/25"
-                placeholder="输入消息…"
-              />
-              <button class="rounded-lg bg-violet-600 px-4 py-2 text-sm text-white" @click="sendChat">发送</button>
+            <div class="flex flex-col gap-2">
+              <div v-if="room.gamePrivate?.role === 'werewolf'" class="flex gap-2">
+                <button 
+                  class="flex-1 rounded-lg border px-2 py-1 text-xs transition-colors"
+                  :class="chatChannel === 'public' ? 'bg-white/10 border-white/20 text-white' : 'border-transparent text-white/50 hover:bg-white/5'"
+                  @click="chatChannel = 'public'"
+                >
+                  公聊
+                </button>
+                <button 
+                  class="flex-1 rounded-lg border px-2 py-1 text-xs transition-colors"
+                  :class="chatChannel === 'wolf' ? 'bg-red-500/20 border-red-500/40 text-red-300' : 'border-transparent text-white/50 hover:bg-white/5'"
+                  @click="chatChannel = 'wolf'"
+                >
+                  狼队私聊
+                </button>
+              </div>
+              <div class="flex gap-2">
+                <input
+                  v-model="chatText"
+                  class="flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-white/25"
+                  :placeholder="chatChannel === 'wolf' ? '输入狼队暗号…' : '输入消息…'"
+                  @keyup.enter="sendChat"
+                />
+                <button class="rounded-lg bg-violet-600 px-4 py-2 text-sm text-white" @click="sendChat">发送</button>
+              </div>
             </div>
           </div>
 

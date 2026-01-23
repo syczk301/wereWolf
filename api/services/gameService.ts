@@ -12,6 +12,7 @@ type GamePlayer = {
   nickname: string
   role: Role
   isAlive: boolean
+  isBot: boolean
 }
 
 type GameRuntime = {
@@ -232,7 +233,10 @@ function startPhase(rt: GameRuntime, phase: GameRuntime['phase']) {
     rt.activeSpeakerSeat = null
     rt.speakingQueue = []
   }
+
+  triggerBotAction(rt) // Trigger bots immediately if it's their turn
 }
+
 
 function initializeSpeakingQueue(rt: GameRuntime, eliminatedSeats: number[]) {
   const aliveSeats = rt.players.filter((p) => p.isAlive).map((p) => p.seat).sort((a, b) => a - b)
@@ -321,6 +325,7 @@ function advanceNightRole(rt: GameRuntime) {
       // Usually each role has its own time, but to keep it simple we just continue.
       // If we want each role to have full time, we'd need to reset phaseEndsAt.
       rt.phaseEndsAt = nowMs() + (rt.timers.nightSeconds / 3 * 1000) // Give partial time for sub-stages
+      triggerBotAction(rt)
       return
     }
   }
@@ -474,6 +479,142 @@ function validateRoleConfig(playerCount: number, rc: GameRuntime['roleConfig']) 
   // if (playerCount - total < 1) throw new Error('至少需要 1 名村民')
 }
 
+function triggerBotAction(rt: GameRuntime) {
+  // 1. NIGHT ACTIONS
+  if (rt.phase === 'night' && rt.activeRole) {
+    const bots = rt.players.filter((p) => p.isBot && p.isAlive && p.role === rt.activeRole)
+    if (bots.length === 0) return
+
+    if (rt.activeRole === 'werewolf') {
+      let acted = false
+      for (const bot of bots) {
+        if (rt.night.wolfVotes[bot.userId] == null) {
+          const targets = rt.players.filter((p) => p.isAlive && p.role !== 'werewolf').map((p) => p.seat)
+          if (targets.length) {
+            const target = targets[Math.floor(Math.random() * targets.length)]
+            rt.night.wolfVotes[bot.userId] = target
+            pushEvent(rt, 'action_submitted', { actionType: 'night.wolfKill', seat: bot.seat })
+            acted = true
+          }
+        }
+      }
+
+      const aliveWolves = rt.players.filter((p) => p.isAlive && p.role === 'werewolf')
+      if (aliveWolves.length > 0 && aliveWolves.every((w) => rt.night.wolfVotes[w.userId] != null)) {
+        advanceNightRole(rt)
+      }
+    } else if (rt.activeRole === 'seer') {
+      const bot = bots[0]
+      if (rt.night.seerTarget == null) {
+        const targets = rt.players.filter((p) => p.isAlive && p.seat !== bot.seat).map((p) => p.seat)
+        if (targets.length) {
+          const target = targets[Math.floor(Math.random() * targets.length)]
+          rt.night.seerTarget = target
+          pushEvent(rt, 'action_submitted', { actionType: 'night.seerCheck', seat: bot.seat })
+          advanceNightRole(rt)
+        }
+      }
+    } else if (rt.activeRole === 'guard') {
+      const bot = bots[0]
+      if (rt.night.guardTarget == null) {
+        const targets = rt.players.filter((p) => p.isAlive).map((p) => p.seat)
+        if (targets.length) {
+          const target = targets[Math.floor(Math.random() * targets.length)]
+          rt.night.guardTarget = target
+          pushEvent(rt, 'action_submitted', { actionType: 'night.guardProtect', seat: bot.seat })
+          advanceNightRole(rt)
+        }
+      }
+    } else if (rt.activeRole === 'witch') {
+      const bot = bots[0]
+      // Determine victim
+      const voteTargets = Object.values(rt.night.wolfVotes)
+      let victimSeat: number | null = null
+      if (voteTargets.length) {
+        const counts = new Map<number, number>()
+        for (const s of voteTargets) counts.set(s, (counts.get(s) ?? 0) + 1)
+        victimSeat = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+      }
+
+      let saved = false
+      if (victimSeat && !rt.night.witchSaveUsed && rt.night.witchSave === false) {
+        if (Math.random() < 0.5) {
+          rt.night.witchSave = true
+          pushEvent(rt, 'action_submitted', { actionType: 'night.witch.save', seat: bot.seat })
+          saved = true
+        }
+      }
+
+      if (!saved && !rt.night.witchPoisonUsed && rt.night.witchPoisonTarget == null) {
+        // Small chance to poison random non-self
+        if (Math.random() < 0.15) {
+          const targets = rt.players.filter((p) => p.isAlive && p.seat !== bot.seat).map((p) => p.seat)
+          if (targets.length) {
+            const target = targets[Math.floor(Math.random() * targets.length)]
+            rt.night.witchPoisonTarget = target
+            pushEvent(rt, 'action_submitted', { actionType: 'night.witch.poison', seat: bot.seat })
+          }
+        }
+      }
+      advanceNightRole(rt)
+    }
+  }
+
+  // 2. DAY VOTE
+  if (rt.phase === 'day_vote') {
+    const bots = rt.players.filter((p) => p.isBot && p.isAlive && rt.day.votes[p.userId] === undefined)
+    const candidates = rt.day.stage === 2 && rt.day.candidates?.length ? rt.day.candidates : rt.players.filter((p) => p.isAlive).map((p) => p.seat)
+
+    let voted = false
+    for (const bot of bots) {
+      if (candidates.length) {
+        const target = candidates[Math.floor(Math.random() * candidates.length)]
+        rt.day.votes[bot.userId] = target
+        // pushEvent(rt, 'action_submitted', { actionType: 'day.vote', seat: bot.seat }) // Optional: log bot votes?
+        voted = true
+      }
+    }
+
+    if (voted) {
+      const alive = rt.players.filter((p) => p.isAlive)
+      const allVoted = alive.every((p) => rt.day.votes[p.userId] !== undefined)
+      if (allVoted) {
+        const result = resolveVote(rt)
+        if (result.tiedSeats.length && rt.day.stage === 1) {
+          rt.day.stage = 2
+          rt.day.candidates = result.tiedSeats
+          pushLog(rt, `平票：${result.tiedSeats.join('、')} 号，进入复投`)
+          pushEvent(rt, 'vote_result', { stage: 1, tiedSeats: result.tiedSeats })
+          startPhase(rt, 'day_vote')
+        } else {
+          const eliminatedSeat = result.eliminatedSeat
+          pushEvent(rt, 'vote_result', { stage: rt.day.stage, eliminatedSeat, tiedSeats: result.tiedSeats })
+
+          if (!eliminatedSeat) {
+            pushLog(rt, '投票无结果，直接进入夜晚')
+            startPhase(rt, 'night')
+          } else {
+            const eliminated = rt.players.find((p) => p.seat === eliminatedSeat)
+            if (eliminated && eliminated.isAlive) eliminated.isAlive = false
+            pushLog(rt, `${eliminatedSeat} 号被放逐`)
+            pushEvent(rt, 'player_eliminated', { seat: eliminatedSeat, reason: 'vote' })
+
+            if (eliminated?.role === 'hunter') {
+              rt.settlement.pendingHunterSeat = eliminated.seat
+              startPhase(rt, 'settlement')
+            } else {
+              startPhase(rt, 'night')
+            }
+          }
+          rt.day.stage = 1
+          rt.day.candidates = undefined
+          rt.day.votes = {}
+        }
+      }
+    }
+  }
+}
+
 export const gameService = {
   async getGamePublicState(gameId: string) {
     const rt = await loadGame(gameId)
@@ -495,6 +636,12 @@ export const gameService = {
     return toPrivate(rt, userId)
   },
 
+  async getWolfUserIds(gameId: string) {
+    const rt = await loadGame(gameId)
+    if (!rt) return []
+    return rt.players.filter(p => p.role === 'werewolf').map(p => p.userId)
+  },
+
   async startGame(roomId: string, requesterUserId: string) {
     const roomRt = await roomService.getRuntime(roomId)
     if (roomRt.ownerUserId !== requesterUserId) throw new Error('仅房主可开局')
@@ -504,6 +651,7 @@ export const gameService = {
       seat: m.seat,
       userId: m.userId!,
       nickname: m.nickname!,
+      isBot: !!m.isBot,
       isReady: m.isReady,
     }))
 
@@ -520,6 +668,7 @@ export const gameService = {
         seat: m.seat,
         userId: m.userId!,
         nickname: m.nickname!,
+        isBot: !!m.isBot,
         isReady: m.isReady,
       }))
     }
@@ -554,6 +703,7 @@ export const gameService = {
         userId: p.userId,
         nickname: p.nickname,
         role: assignedRoles[idx],
+        isBot: p.isBot,
         isAlive: true,
       })),
       roleConfig: roomRt.roleConfig,
@@ -589,7 +739,7 @@ export const gameService = {
     return { roomState, gamePublic }
   },
 
-  async appendChat(roomId: string, userId: string, nickname: string, text: string) {
+  async appendChat(roomId: string, userId: string, nickname: string, text: string, channel: 'public' | 'wolf' = 'public') {
     const trimmed = String(text ?? '').trim().slice(0, 200)
     if (!trimmed) throw new Error('EMPTY')
 
@@ -602,9 +752,31 @@ export const gameService = {
     const p = rt.players.find((x) => x.userId === userId)
     if (!p) throw new Error('NOT_IN_GAME')
 
-    const msg = { id: nanoid(10), at: nowMs(), sender: { id: userId, nickname }, text: trimmed }
-    pushEvent(rt, 'chat_message', msg)
-    pushLog(rt, `${nickname}: ${trimmed}`)
+    if (channel === 'wolf') {
+      if (p.role !== 'werewolf') throw new Error('你不是狼人')
+      // Wolf chat allowed at night? Yes. Allowed at day? Typically yes, unless restricted. 
+      // Let's allow Wolf Chat at any time for typical online Werewolf rules.
+    } else {
+      // Public Chat Restrictions
+      if (rt.activeSpeakerSeat != null) {
+        if (p.seat !== rt.activeSpeakerSeat) {
+          throw new Error('未到发言阶段')
+        }
+      } else if (rt.phase === 'night') {
+        throw new Error('夜晚无法发言')
+      }
+    }
+
+    const msg = { id: nanoid(10), at: nowMs(), sender: { id: userId, nickname }, text: trimmed, channel }
+
+    // We don't push private chat to public events/logs to keep it hidden
+    if (channel === 'public') {
+      pushEvent(rt, 'chat_message', msg)
+      pushLog(rt, `${nickname}: ${trimmed}`)
+    }
+    // For wolf chat, we could push a private event or just rely on socket delivery.
+    // For simplicity and replay security, we don't push to publicLog.
+
     await saveGame(rt)
     return msg
   },

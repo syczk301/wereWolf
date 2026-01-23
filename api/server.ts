@@ -33,25 +33,38 @@ server.listen(config.port, () => {
 /**
  * close server
  */
-process.once('SIGUSR2', () => {
-  server.close(() => {
-    process.kill(process.pid, 'SIGUSR2')
+// Gracefully handle shutdown steps
+function shutdown(signal: string) {
+  console.log(`Received ${signal}, shutting down...`)
+
+  // Close Socket.IO first
+  io.close(() => {
+    console.log('Socket.IO closed')
   })
+
+  // Close HTTP server
+  server.close((err) => {
+    if (err) {
+      console.error('Error closing server:', err)
+      process.exit(1)
+    }
+    console.log('Server closed')
+    if (signal === 'SIGUSR2') {
+      process.kill(process.pid, 'SIGUSR2')
+    } else {
+      process.exit(0)
+    }
+  })
+
+  // Force close after timeout if lagging
   setTimeout(() => {
-    process.kill(process.pid, 'SIGUSR2')
-  }, 2000).unref()
-})
+    console.error('Could not close connections in time, forcefully shutting down')
+    process.exit(1)
+  }, 3000).unref()
+}
 
-process.on('SIGTERM', () => {
-  server.close(() => {
-    process.exit(0)
-  })
-})
-
-process.on('SIGINT', () => {
-  server.close(() => {
-    process.exit(0)
-  })
-})
+process.once('SIGUSR2', () => shutdown('SIGUSR2'))
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT', () => shutdown('SIGINT'))
 
 export default app

@@ -4,12 +4,14 @@ import { useRouter } from 'vue-router'
 import { api } from '@/utils/api'
 import { useSessionStore } from '@/stores/session'
 import { useSocket } from '@/composables/useSocket'
+import { useRoomStore } from '@/stores/room'
 
 type RoomSummary = { id: string; name: string; status: string; playerCount: number; maxPlayers: number }
 
 const router = useRouter()
 const session = useSessionStore()
 const { connect } = useSocket()
+const room = useRoomStore()
 
 const rooms = ref<RoomSummary[]>([])
 const loading = ref(false)
@@ -48,6 +50,7 @@ async function onCreateRoom() {
       name: createName.value,
       maxPlayers: createMaxPlayers.value,
     })
+    room.applyRoom(resp.room) // Pre-load room state
     await router.push(`/room/${resp.room.id}`)
   } catch (e: any) {
     const msg = e?.message ?? '创建失败'

@@ -8,7 +8,7 @@ type ClientToServerEvents = {
   'room:start': (payload: { roomId: string }) => void
   'room:config:update': (payload: { roomId: string; roleConfig?: any; timers?: any }) => void
   'room:bot:add': (payload: { roomId: string }) => void
-  'chat:send': (payload: { roomId: string; text: string }) => void
+  'chat:send': (payload: { roomId: string; text: string; channel?: 'public' | 'wolf' }) => void
   'game:action': (payload: { roomId: string; actionType: string; payload: any }) => void
 }
 
@@ -29,16 +29,11 @@ export function useSocket() {
   const session = useSessionStore()
 
   function connect(): AppSocket {
-    // 如果已有连接且已连接，直接返回
-    if (socketRef.value?.connected) {
-      isConnected.value = true
-      return socketRef.value
-    }
-
-    // 如果有连接但未连接，先断开
     if (socketRef.value) {
-      socketRef.value.disconnect()
-      socketRef.value = null
+      if (!socketRef.value.connected) {
+        socketRef.value.connect()
+      }
+      return socketRef.value
     }
 
     if (!session.token) throw new Error('NO_TOKEN')

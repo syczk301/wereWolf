@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeWinner } from './rules'
+import { computeWinner } from './rules.js'
 
 describe('computeWinner', () => {
   it('returns villagers when no wolves alive', () => {

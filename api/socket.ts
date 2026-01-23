@@ -115,14 +115,48 @@ export async function initSocket(io: SocketIOServer<ClientToServerEvents, Server
       }
     })
 
-    socket.on('chat:send', async ({ roomId, text }) => {
+    socket.on('chat:send', async ({ roomId, text, channel }: { roomId: string; text: string; channel?: 'public' | 'wolf' }) => {
       try {
-        const msg = await gameService.appendChat(roomId, socket.data.userId, socket.data.nickname, text)
-        io.to(roomId).emit('chat:new', msg)
-        const g = await gameService.getGamePublicStateByRoom(roomId)
-        if (g) io.to(roomId).emit('game:state', g)
-      } catch {
-        socket.emit('toast', { type: 'error', message: '发送失败' })
+        const msg = await gameService.appendChat(roomId, socket.data.userId, socket.data.nickname, text, channel)
+
+        if (msg.channel === 'wolf') {
+          // Multicast to wolves only
+          const g = await gameService.getGamePublicStateByRoom(roomId)
+          if (g) {
+            // Find all wolves (including self)
+            // Note: gamePublic doesn't have roles. We need to iterate players and checking private state is expensive.
+            // Better: Get room members, iterate, check private state?
+            // Or rely on room service or a helper in gameService?
+            // Helper in gameService `getWolfUserIds` would be best, but let's do it inline for now if possible or add helper.
+            // Actually, simplest is to iterate all members in room, check their role?
+            // Since we have `g.players` (which are seat+user), we can iterate them.
+            // But we don't know their role from `g`.
+            // We need to load the game runtime to know roles efficiently.
+            // `gameService` should return the target userIds.
+
+            // Let's modify appendChat to return targetUserIds?
+            // No, `appendChat` currently just returns msg.
+            // Let's assume we fetch `gameService.getGamePrivateState` for each user is too slow (N calls).
+            // Let's add `gameService.getRoleUserIds(gameId, role)`?
+            // Or just iterate sockets in `roomId` room and check logic?
+            // Sockets don't know roles.
+
+            // FIX: We need a way to know who to send to.
+            // Let's use `gameService.getPrivateCHatRecipients(gameId, channel, senderId)`.
+            // Or simpler: just helper `getWolfUserIds`.
+            const wolfIds = await gameService.getWolfUserIds(g.gameId)
+            for (const uid of wolfIds) {
+              io.to(`user:${uid}`).emit('chat:new', msg)
+            }
+          }
+        } else {
+          // Public
+          io.to(roomId).emit('chat:new', msg)
+          const g = await gameService.getGamePublicStateByRoom(roomId)
+          if (g) io.to(roomId).emit('game:state', g)
+        }
+      } catch (e: any) {
+        socket.emit('toast', { type: 'error', message: e?.message ?? '发送失败' })
       }
     })
 
