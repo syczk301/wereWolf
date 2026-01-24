@@ -12,6 +12,7 @@ type ClientToServerEvents = {
   'room:start': (payload: { roomId: string }) => void
   'room:config:update': (payload: { roomId: string; roleConfig?: any; timers?: any }) => void
   'room:bot:add': (payload: { roomId: string }) => void
+  'room:bot:fill': (payload: { roomId: string }) => void
   'chat:send': (payload: { roomId: string; text: string }) => void
   'game:action': (payload: { roomId: string; actionType: string; payload: any }) => void
 }
@@ -123,6 +124,16 @@ export async function initSocket(io: SocketIOServer<ClientToServerEvents, Server
         io.to(roomId).emit('room:state', roomState)
       } catch (e: any) {
         socket.emit('toast', { type: 'error', message: e?.message ?? '添加机器人失败' })
+      }
+    })
+
+    socket.on('room:bot:fill', async ({ roomId }) => {
+      try {
+        await roomService.fillBots(roomId)
+        const roomState = await roomService.getRoomState(roomId)
+        io.to(roomId).emit('room:state', roomState)
+      } catch (e: any) {
+        socket.emit('toast', { type: 'error', message: e?.message ?? '一键补员失败' })
       }
     })
 

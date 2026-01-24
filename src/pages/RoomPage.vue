@@ -120,23 +120,15 @@ function confirmAddBots() {
   if (!socket.value) return
   addingBots.value = true
   
-  // 添加所需数量的机器人
-  let added = 0
-  const addNext = () => {
-    if (added >= neededBots.value) {
-      addingBots.value = false
-      showBotConfirm.value = false
-      // 添加完成后自动开始游戏
-      setTimeout(() => {
-        socket.value?.emit('room:start', { roomId: roomId.value })
-      }, 500)
-      return
-    }
-    socket.value?.emit('room:bot:add', { roomId: roomId.value })
-    added++
-    setTimeout(addNext, 200)
-  }
-  addNext()
+  // 使用后端一键补员，无需前端循环等待
+  socket.value.emit('room:bot:fill', { roomId: roomId.value })
+
+  // 给予短暂缓冲等待后端处理并更新状态，然后自动开局
+  setTimeout(() => {
+    addingBots.value = false
+    showBotConfirm.value = false
+    socket.value?.emit('room:start', { roomId: roomId.value })
+  }, 600)
 }
 
 function cancelBotConfirm() {
