@@ -11,6 +11,7 @@ type MemCollection = {
   insertOne: (doc: any) => Promise<void>
   updateOne: (filter: any, update: any) => Promise<void>
   updateMany: (filter: any, update: any) => Promise<void>
+  deleteOne: (filter: any) => Promise<{ deletedCount: number }>
   find: (filter: any) => { sort: (spec: any) => any; limit: (n: number) => any; toArray: () => Promise<any[]> }
 }
 
@@ -34,6 +35,32 @@ function matchFilter(doc: any, filter: any): boolean {
       if ('$in' in val) {
         const list = (val as any).$in
         if (!Array.isArray(list) || !list.includes(doc[key])) return false
+        continue
+      }
+
+      if ('$lt' in val) {
+        if (!(doc[key] < (val as any).$lt)) return false
+        continue
+      }
+
+      if ('$lte' in val) {
+        if (!(doc[key] <= (val as any).$lte)) return false
+        continue
+      }
+
+      if ('$gt' in val) {
+        if (!(doc[key] > (val as any).$gt)) return false
+        continue
+      }
+
+      if ('$gte' in val) {
+        if (!(doc[key] >= (val as any).$gte)) return false
+        continue
+      }
+
+      if ('$exists' in val) {
+        const exists = doc[key] !== undefined && doc[key] !== null
+        if ((val as any).$exists !== exists) return false
         continue
       }
 
@@ -106,6 +133,15 @@ function createMemCollection(map: Map<string, MemDoc>): MemCollection {
         applyUpdate(next, update)
         map.set(id, next)
       }
+    },
+    async deleteOne(filter: any) {
+      for (const [id, d] of map.entries()) {
+        if (matchFilter(d, filter)) {
+          map.delete(id)
+          return { deletedCount: 1 }
+        }
+      }
+      return { deletedCount: 0 }
     },
     find(filter: any) {
       const base = [...map.values()].filter((d) => matchFilter(d, filter)).map((d) => ({ ...d }))

@@ -7,6 +7,7 @@ import { gameService } from './services/gameService.js'
 
 type ClientToServerEvents = {
   'room:join': (payload: { roomId: string }, cb?: (resp: { ok: true } | { ok: false; error: string }) => void) => void
+  'room:leave': (payload: { roomId: string }) => void
   'room:ready': (payload: { roomId: string; ready: boolean }) => void
   'room:start': (payload: { roomId: string }) => void
   'room:config:update': (payload: { roomId: string; roleConfig?: any; timers?: any }) => void
@@ -17,6 +18,7 @@ type ClientToServerEvents = {
 
 type ServerToClientEvents = {
   'room:state': (payload: any) => void
+  'room:dissolved': (payload: { roomId: string }) => void
   'game:state': (payload: any) => void
   'game:private': (payload: any) => void
   'chat:new': (payload: any) => void
@@ -66,6 +68,31 @@ export async function initSocket(io: SocketIOServer<ClientToServerEvents, Server
         cb?.({ ok: true })
       } catch (e: any) {
         cb?.({ ok: false, error: e?.message ?? 'JOIN_FAILED' })
+      }
+    })
+
+    socket.on('room:leave', async ({ roomId }) => {
+      try {
+        const result = await roomService.leaveRoom(roomId, socket.data.userId)
+
+        // 离开 socket.io 房间
+        await socket.leave(roomId)
+
+        if (result.dissolved) {
+          // 房间已解散，通知所有人
+          io.to(roomId).emit('room:dissolved', { roomId })
+          io.to(roomId).emit('toast', { type: 'info', message: '房间已解散' })
+        } else {
+          // 更新房间状态给剩余玩家
+          const roomState = await roomService.getRoomState(roomId)
+          io.to(roomId).emit('room:state', roomState)
+
+          if (result.newOwnerId) {
+            io.to(roomId).emit('toast', { type: 'info', message: '房主已变更' })
+          }
+        }
+      } catch (e: any) {
+        socket.emit('toast', { type: 'error', message: e?.message ?? '退出房间失败' })
       }
     })
 

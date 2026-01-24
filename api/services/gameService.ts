@@ -131,6 +131,36 @@ function toPrivate(rt: GameRuntime, userId: string): GamePrivateState {
     else if (p.role === 'witch') {
       selectedTargetSeat = rt.night.witchPoisonTarget ?? null
       witchSaveDecision = rt.night.witchSave
+
+      // 计算狼人击杀目标
+      let victim: number | null = null
+      const voteTargets = Object.values(rt.night.wolfVotes)
+      if (voteTargets.length) {
+        const counts = new Map<number, number>()
+        for (const s of voteTargets) counts.set(s, (counts.get(s) ?? 0) + 1)
+        const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
+        victim = sorted[0]?.[0] ?? null
+      }
+
+      // 如果解药已用，或者今晚自己被杀了（虽然女巫可以自救？规则通常第一晚可以），
+      // 这里简单处理：只要有victim就给前端，前端判断能否救
+      // 通常规则：全程不能自救，或仅第一晚可自救。这里先不强制后端限制，把信息给前端。
+
+      return {
+        role: p.role,
+        seat: p.seat,
+        hints: (rt.hintsByUserId[userId] ?? []).slice(-60),
+        actions: {
+          hunterShoot: (rt.phase as string) === 'settlement' && rt.settlement.pendingHunterSeat === p.seat,
+        },
+        selectedTargetSeat,
+        witchSaveDecision,
+        witchInfo: {
+          nightVictimSeat: victim,
+          saveUsed: rt.night.witchSaveUsed,
+          poisonUsed: rt.night.witchPoisonUsed
+        }
+      }
     }
   } else if (rt.phase === 'day_vote') {
     selectedTargetSeat = rt.day.votes[userId]
@@ -647,7 +677,7 @@ export const gameService = {
     if (roomRt.ownerUserId !== requesterUserId) throw new Error('仅房主可开局')
     if (roomRt.status !== 'waiting') throw new Error('房间状态不允许开局')
 
-    let players = roomRt.members.filter((m) => !!m.userId).map((m) => ({
+    const players = roomRt.members.filter((m) => !!m.userId).map((m) => ({
       seat: m.seat,
       userId: m.userId!,
       nickname: m.nickname!,
@@ -655,25 +685,13 @@ export const gameService = {
       isReady: m.isReady,
     }))
 
-    if (players.length < roomRt.maxPlayers) {
-      // Auto-fill bots
-      await roomService.fillBots(roomId)
-
-      // Reload room runtime to get bots
-      const updatedRt = await roomService.getRuntime(roomId)
-      roomRt.members = updatedRt.members
-
-      // Re-filter players
-      players = roomRt.members.filter((m) => !!m.userId).map((m) => ({
-        seat: m.seat,
-        userId: m.userId!,
-        nickname: m.nickname!,
-        isBot: !!m.isBot,
-        isReady: m.isReady,
-      }))
-    }
-
     if (players.length < 1) throw new Error('至少需要 1 人')
+
+    // 检查人数是否足够
+    if (players.length < roomRt.maxPlayers) {
+      const needed = roomRt.maxPlayers - players.length
+      throw new Error(`NEED_BOTS:${needed}:人数不足，还需要 ${needed} 名玩家`)
+    }
     if (players.some((p) => !p.isReady)) throw new Error('仍有玩家未准备')
 
     validateRoleConfig(players.length, roomRt.roleConfig)

@@ -5,6 +5,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/socket.io/(.*)",
+      "destination": "/api/index"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

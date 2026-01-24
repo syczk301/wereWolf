@@ -44,6 +44,20 @@ function createFallbackClient() {
       const s = fallbackSets.get(key) ?? new Set<string>()
       return [...s]
     },
+    async keys(pattern: string) {
+      // Simple pattern matching for roomrt:* style patterns
+      const prefix = pattern.replace('*', '')
+      const results: string[] = []
+      for (const k of fallbackKv.keys()) {
+        if (k.startsWith(prefix)) {
+          results.push(k)
+        }
+      }
+      return results
+    },
+    async exists(key: string) {
+      return fallbackKv.has(key) ? 1 : 0
+    },
   }
   return c
 }
