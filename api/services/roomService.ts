@@ -45,11 +45,13 @@ type RoomDoc = {
   ownerUserId: string
   status: 'waiting' | 'playing' | 'ended'
   maxPlayers: number
+  roomNumber?: number
   createdAt: Date
 }
 
 type RoomRuntime = {
   roomId: string
+  roomNumber: number
   name: string
   status: 'waiting' | 'playing' | 'ended'
   ownerUserId: string
@@ -58,6 +60,7 @@ type RoomRuntime = {
   roleConfig: { werewolf: number; seer: number; witch: number; hunter: number; guard: number }
   timers: { nightSeconds: number; daySpeechSeconds: number; dayVoteSeconds: number; settlementSeconds: number }
   gameId?: string
+  createdAt: number
 }
 
 async function loadRuntime(roomId: string): Promise<RoomRuntime | null> {
@@ -75,6 +78,7 @@ async function saveRuntime(rt: RoomRuntime) {
 async function buildState(rt: RoomRuntime): Promise<RoomState> {
   return {
     id: rt.roomId,
+    roomNumber: rt.roomNumber,
     name: rt.name,
     status: rt.status,
     ownerUserId: rt.ownerUserId,
@@ -97,11 +101,13 @@ export const roomService = {
     const db = await getDb()
     const rooms = db.collection<RoomDoc>('rooms')
     const roomId = nanoid(10)
+    const roomNumber = Math.floor(1000 + Math.random() * 9000) // Simple 4-digit ID
     const now = new Date()
 
     const safeName = (name || '新房间').slice(0, 40)
     await rooms.insertOne({
       _id: roomId,
+      roomNumber,
       name: safeName,
       ownerUserId,
       status: 'waiting',
@@ -124,6 +130,7 @@ export const roomService = {
 
     const rt: RoomRuntime = {
       roomId,
+      roomNumber,
       name: safeName,
       status: 'waiting',
       ownerUserId,
@@ -131,6 +138,7 @@ export const roomService = {
       members: members as any,
       roleConfig: defaultRoleConfig(Math.min(maxPlayers, 12)),
       timers: defaultTimers(),
+      createdAt: now.getTime(),
     }
 
     await saveRuntime(rt)
@@ -152,6 +160,7 @@ export const roomService = {
       const playerCount = rt ? rt.members.filter((m) => !!m.userId).length : 0
       result.push({
         id: d._id,
+        roomNumber: d.roomNumber,
         name: d.name,
         status: d.status,
         playerCount,
@@ -182,6 +191,8 @@ export const roomService = {
         roleConfig: defaultRoleConfig(Math.min(doc.maxPlayers, 12)),
         timers: defaultTimers(),
         gameId: undefined,
+        roomNumber: doc.roomNumber || 0,
+        createdAt: doc.createdAt?.getTime() || Date.now(),
       }
       await saveRuntime(rt)
     }
@@ -247,6 +258,59 @@ export const roomService = {
     if (changed) {
       await saveRuntime(rt)
     }
+  },
+
+  async leaveRoom(roomId: string, userId: string): Promise<{ dissolved: boolean; newOwnerId?: string }> {
+    const rt = await loadRuntime(roomId)
+    if (!rt) throw new Error('房间不存在')
+
+    // 游戏进行中不允许退出
+    if (rt.status === 'playing') throw new Error('游戏进行中不可退出')
+
+    const memberIndex = rt.members.findIndex((m) => m.userId === userId)
+    if (memberIndex === -1) throw new Error('未加入房间')
+
+    const isOwner = rt.ownerUserId === userId
+
+    // 清空该座位
+    const member = rt.members[memberIndex]
+    member.userId = undefined
+    member.nickname = undefined
+    member.isReady = false
+    member.isAlive = true
+    member.isBot = false
+
+    // 检查剩余真实玩家（非机器人）
+    const remainingPlayers = rt.members.filter((m) => m.userId && !m.isBot)
+
+    if (remainingPlayers.length === 0) {
+      // 没有其他真实玩家，解散房间
+      const redis = await getRedis()
+      const db = await getDb()
+      await redis.del(`roomrt:${roomId}`)
+      await db.collection<RoomDoc>('rooms').deleteOne({ _id: roomId })
+      return { dissolved: true }
+    }
+
+    if (isOwner) {
+      // 房主退出，按座位号顺序转让给下一个真实玩家
+      const sortedPlayers = remainingPlayers.sort((a, b) => a.seat - b.seat)
+      const newOwner = sortedPlayers[0]
+      rt.ownerUserId = newOwner.userId!
+
+      // 更新 MongoDB 中的房主信息
+      const db = await getDb()
+      await db.collection<RoomDoc>('rooms').updateOne(
+        { _id: roomId },
+        { $set: { ownerUserId: newOwner.userId } }
+      )
+
+      await saveRuntime(rt)
+      return { dissolved: false, newOwnerId: newOwner.userId }
+    }
+
+    await saveRuntime(rt)
+    return { dissolved: false }
   },
 
   async setReady(roomId: string, userId: string, ready: boolean) {
@@ -316,5 +380,61 @@ export const roomService = {
     const rt = await loadRuntime(roomId)
     if (!rt) throw new Error('房间不存在')
     return rt
+  },
+
+  async checkAndExpireRooms(io?: any) {
+    try {
+      const redis = await getRedis()
+      const db = await getDb()
+      const now = Date.now()
+      const twoMinutesAgo = new Date(now - 120000)
+
+      // Part 1: Clean Redis-based runtimes
+      const keys = await redis.keys('roomrt:*')
+      console.log(`[Expiry Check] Found ${keys.length} Redis keys`)
+      for (const key of keys) {
+        const raw = await redis.get(key)
+        if (!raw) continue
+        const rt = JSON.parse(String(raw)) as RoomRuntime
+
+        if (rt.status !== 'waiting') continue
+
+        const createdAt = rt.createdAt || 0
+        const diff = now - createdAt
+
+        if (diff > 120000) {
+          console.log(`[Expiry] Room ${rt.roomId} expired. Age: ${Math.floor(diff / 1000)}s`)
+          if (io) {
+            io.to(rt.roomId).emit('toast', { type: 'info', message: '房间长时间未开始，已自动解散' })
+            io.to(rt.roomId).emit('room:expired', { roomId: rt.roomId })
+          }
+          await redis.del(key)
+          await db.collection<RoomDoc>('rooms').deleteOne({ _id: rt.roomId })
+        }
+      }
+
+      // Part 2: Clean orphaned MongoDB rooms
+      const orphanedRooms = await db.collection<RoomDoc>('rooms')
+        .find({
+          status: 'waiting',
+          $or: [
+            { createdAt: { $lt: twoMinutesAgo } },
+            { createdAt: { $exists: false } }
+          ]
+        })
+        .toArray()
+
+      console.log(`[Expiry Check] Found ${orphanedRooms.length} orphaned MongoDB rooms`)
+
+      for (const room of orphanedRooms) {
+        const hasRuntime = await redis.exists(`roomrt:${room._id}`)
+        if (!hasRuntime) {
+          console.log(`[Expiry] Orphaned room ${room._id} deleted from MongoDB`)
+          await db.collection<RoomDoc>('rooms').deleteOne({ _id: room._id })
+        }
+      }
+    } catch (err) {
+      console.error('[Expiry Check] Error:', err)
+    }
   },
 }

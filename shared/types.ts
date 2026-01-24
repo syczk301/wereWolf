@@ -28,6 +28,7 @@ export type RoomSummary = {
   status: RoomStatus
   playerCount: number
   maxPlayers: number
+  roomNumber?: number
 }
 
 export type SeatPublicState = {
@@ -39,6 +40,7 @@ export type SeatPublicState = {
 
 export type RoomState = {
   id: RoomId
+  roomNumber?: number
   name: string
   status: RoomStatus
   ownerUserId: UserId
@@ -47,6 +49,7 @@ export type RoomState = {
   gameId?: GameId
   roleConfig?: { werewolf: number; seer: number; witch: number; hunter: number; guard: number }
   timers?: { nightSeconds: number; daySpeechSeconds: number; dayVoteSeconds: number; settlementSeconds: number }
+  createdAt?: number
 }
 
 export type GamePublicState = {
@@ -72,6 +75,12 @@ export type GamePrivateState = {
   }
   selectedTargetSeat?: number | null
   witchSaveDecision?: boolean
+  // 新增女巫信息
+  witchInfo?: {
+    nightVictimSeat?: number | null // 昨夜死者
+    saveUsed: boolean    // 解药已用
+    poisonUsed: boolean  // 毒药已用
+  }
 }
 
 export type ReplayEventType =

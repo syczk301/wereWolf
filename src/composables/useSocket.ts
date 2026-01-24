@@ -4,6 +4,7 @@ import { useSessionStore } from '@/stores/session'
 
 type ClientToServerEvents = {
   'room:join': (payload: { roomId: string }, cb?: (resp: { ok: true } | { ok: false; error: string }) => void) => void
+  'room:leave': (payload: { roomId: string }) => void
   'room:ready': (payload: { roomId: string; ready: boolean }) => void
   'room:start': (payload: { roomId: string }) => void
   'room:config:update': (payload: { roomId: string; roleConfig?: any; timers?: any }) => void
@@ -14,6 +15,8 @@ type ClientToServerEvents = {
 
 type ServerToClientEvents = {
   'room:state': (payload: any) => void
+  'room:dissolved': (payload: { roomId: string }) => void
+  'room:expired': (payload: { roomId: string }) => void
   'game:state': (payload: any) => void
   'game:private': (payload: any) => void
   'chat:new': (payload: any) => void
