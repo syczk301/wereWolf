@@ -17,7 +17,6 @@ if (!parsed.success) {
   throw new Error(`Invalid env: ${issues}`)
 }
 
-// Avoid Vercel reserved export name "config"
 export const envConfig = {
   port: parsed.data.PORT,
   jwtSecret: parsed.data.JWT_SECRET ?? 'dev-secret-change-me-please',

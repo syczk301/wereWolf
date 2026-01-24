@@ -1,6 +1,6 @@
 import type { Collection, Document, Db } from 'mongodb'
 import { MongoClient } from 'mongodb'
-import { envConfig } from '../config.js'
+import { envConfig } from '../../shared/env.js'
 
 let client: MongoClient | null = null
 let forceMemory = false

@@ -4,7 +4,7 @@
 import http from 'http'
 import { Server as SocketIOServer } from 'socket.io'
 import app from './app.js'
-import { envConfig } from './config.js'
+import { envConfig } from '../shared/env.js'
 import { initSocket } from './socket.js'
 import { roomService } from './services/roomService.js'
 

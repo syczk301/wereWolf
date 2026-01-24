@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
-import { envConfig } from '../config.js'
+import { envConfig } from '../../shared/env.js'
 import { getDb } from '../db/mongo.js'
 import { getRedis } from '../db/redis.js'
 

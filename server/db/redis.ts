@@ -1,5 +1,5 @@
 import { createClient } from 'redis'
-import { envConfig } from '../config.js'
+import { envConfig } from '../../shared/env.js'
 
 let client: ReturnType<typeof createClient> | null = null
 
