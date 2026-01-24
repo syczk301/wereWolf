@@ -4,7 +4,7 @@
 import http from 'http'
 import { Server as SocketIOServer } from 'socket.io'
 import app from './app.js'
-import { config } from './config.js'
+import { envConfig } from './config.js'
 import { initSocket } from './socket.js'
 import { roomService } from './services/roomService.js'
 
@@ -27,8 +27,8 @@ const io = new SocketIOServer(server, {
 
 await initSocket(io)
 
-server.listen(config.port, () => {
-  console.log(`Server ready on port ${config.port}`)
+server.listen(envConfig.port, () => {
+  console.log(`Server ready on port ${envConfig.port}`)
 
   // Clean up expired rooms every 10 seconds
   setInterval(() => {

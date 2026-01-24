@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
-import { config } from '../config.js'
+import { envConfig } from '../config.js'
 import { getDb } from '../db/mongo.js'
 import { getRedis } from '../db/redis.js'
 
@@ -59,7 +59,7 @@ export async function loginUser(input: { emailOrUsername: string; password: stri
   const redis = await getRedis()
   await redis.set(`session:${sessionId}`, user._id, { EX: 60 * 60 * 24 * 30 })
 
-  const token = jwt.sign({ sub: user._id, sid: sessionId, nickname: user.nickname }, config.jwtSecret, {
+  const token = jwt.sign({ sub: user._id, sid: sessionId, nickname: user.nickname }, envConfig.jwtSecret, {
     expiresIn: '30d',
   })
 
@@ -75,7 +75,7 @@ export async function guestLogin(input?: { nickname?: string }) {
   const redis = await getRedis()
   await redis.set(`session:${sessionId}`, guestId, { EX: 60 * 60 * 24 * 7 })
 
-  const token = jwt.sign({ sub: guestId, sid: sessionId, nickname, guest: true }, config.jwtSecret, {
+  const token = jwt.sign({ sub: guestId, sid: sessionId, nickname, guest: true }, envConfig.jwtSecret, {
     expiresIn: '7d',
   })
 
@@ -88,7 +88,7 @@ export async function upgradeGuestToUser(input: {
   password: string
   nickname?: string
 }) {
-  const decoded = jwt.verify(input.token, config.jwtSecret)
+  const decoded = jwt.verify(input.token, envConfig.jwtSecret)
   const parsed = jwtPayloadSchema.parse(decoded)
   if (!parsed.sub.startsWith('guest:')) throw new Error('NOT_GUEST')
 
@@ -127,12 +127,12 @@ export async function upgradeGuestToUser(input: {
     )
   } catch {
     return {
-      accessToken: jwt.sign({ sub: userId, sid: sessionId, nickname }, config.jwtSecret, { expiresIn: '30d' }),
+      accessToken: jwt.sign({ sub: userId, sid: sessionId, nickname }, envConfig.jwtSecret, { expiresIn: '30d' }),
       user: { id: userId, nickname, isGuest: false as const },
     }
   }
 
-  const token = jwt.sign({ sub: userId, sid: sessionId, nickname }, config.jwtSecret, {
+  const token = jwt.sign({ sub: userId, sid: sessionId, nickname }, envConfig.jwtSecret, {
     expiresIn: '30d',
   })
 
@@ -140,7 +140,7 @@ export async function upgradeGuestToUser(input: {
 }
 
 export async function logoutToken(token: string) {
-  const decoded = jwt.verify(token, config.jwtSecret)
+  const decoded = jwt.verify(token, envConfig.jwtSecret)
   const parsed = jwtPayloadSchema.safeParse(decoded)
   if (!parsed.success) return
   const redis = await getRedis()
@@ -148,7 +148,7 @@ export async function logoutToken(token: string) {
 }
 
 export async function verifyAccessToken(token: string) {
-  const decoded = jwt.verify(token, config.jwtSecret)
+  const decoded = jwt.verify(token, envConfig.jwtSecret)
   const parsed = jwtPayloadSchema.parse(decoded)
 
   const redis = await getRedis()

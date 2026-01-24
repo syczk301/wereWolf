@@ -1,6 +1,6 @@
 import type { Collection, Document, Db } from 'mongodb'
 import { MongoClient } from 'mongodb'
-import { config } from '../config.js'
+import { envConfig } from '../config.js'
 
 let client: MongoClient | null = null
 let forceMemory = false
@@ -186,7 +186,7 @@ export type DbLike = Pick<Db, 'collection'>
 export async function getMongoClient(): Promise<MongoClient> {
   if (forceMemory) return { db: () => memDb } as any
   if (client) return client
-  client = new MongoClient(config.mongodbUri)
+  client = new MongoClient(envConfig.mongodbUri)
   try {
     await client.connect()
   } catch {

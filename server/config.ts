@@ -17,7 +17,7 @@ if (!parsed.success) {
   throw new Error(`Invalid env: ${issues}`)
 }
 
-export const config = {
+export const envConfig = {
   port: Number(parsed.data.PORT ?? '3001'),
   jwtSecret: parsed.data.JWT_SECRET ?? 'dev-secret-change-me-please',
   mongodbUri: parsed.data.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/werewolf',

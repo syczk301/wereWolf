@@ -17,7 +17,8 @@ if (!parsed.success) {
   throw new Error(`Invalid env: ${issues}`)
 }
 
-export const config = {
+// Avoid Vercel reserved export name "config"
+export const envConfig = {
   port: parsed.data.PORT,
   jwtSecret: parsed.data.JWT_SECRET ?? 'dev-secret-change-me-please',
   mongodbUri: parsed.data.MONGODB_URI ?? 'mongodb://127.0.0.1:27017/werewolf',

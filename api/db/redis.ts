@@ -1,5 +1,5 @@
 import { createClient } from 'redis'
-import { config } from '../config.js'
+import { envConfig } from '../config.js'
 
 let client: ReturnType<typeof createClient> | null = null
 
@@ -65,7 +65,7 @@ function createFallbackClient() {
 export async function getRedis() {
   if (client) return client
 
-  client = createClient({ url: config.redisUrl })
+  client = createClient({ url: envConfig.redisUrl })
   try {
     await client.connect()
   } catch {
