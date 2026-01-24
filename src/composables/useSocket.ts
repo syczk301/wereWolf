@@ -9,6 +9,7 @@ type ClientToServerEvents = {
   'room:start': (payload: { roomId: string }) => void
   'room:config:update': (payload: { roomId: string; roleConfig?: any; timers?: any }) => void
   'room:bot:add': (payload: { roomId: string }) => void
+  'room:bot:fill': (payload: { roomId: string }) => void
   'chat:send': (payload: { roomId: string; text: string; channel?: 'public' | 'wolf' }) => void
   'game:action': (payload: { roomId: string; actionType: string; payload: any }) => void
 }
