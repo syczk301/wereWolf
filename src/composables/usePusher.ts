@@ -37,7 +37,7 @@ export function usePusher() {
 
   function subscribeUser(userId: string): Channel {
     const p = connect()
-    const safe = userId.replace(/[^a-zA-Z0-9_\-]/g, '-')
+    const safe = userId.replace(/[^a-zA-Z0-9_-]/g, '-')
     return p.subscribe(`user-${safe}`)
   }
 
@@ -46,7 +46,7 @@ export function usePusher() {
   }
 
   function unsubscribeUser(userId: string) {
-    const safe = userId.replace(/[^a-zA-Z0-9_\-]/g, '-')
+    const safe = userId.replace(/[^a-zA-Z0-9_-]/g, '-')
     pusher?.unsubscribe(`user-${safe}`)
   }
 

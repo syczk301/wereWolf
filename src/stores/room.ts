@@ -9,8 +9,14 @@ export const useRoomStore = defineStore('room', () => {
   const toasts = ref<{ id: string; type: 'info' | 'error'; message: string }[]>([])
   const chat = ref<{ id: string; at: number; sender: { id: string; nickname: string }; text: string }[]>([])
 
+  // Calibrate countdowns with server clock to avoid cross-device drift.
+  const serverTimeOffsetMs = ref(0)
   const now = ref(Date.now())
   let timer: any = null
+
+  function getAlignedNow() {
+    return Date.now() + serverTimeOffsetMs.value
+  }
 
   const phaseLeftMs = computed(() => {
     if (!gamePublic.value) return 0
@@ -40,7 +46,7 @@ export const useRoomStore = defineStore('room', () => {
   function startTimer() {
     if (timer) return
     timer = setInterval(() => {
-      now.value = Date.now()
+      now.value = getAlignedNow()
     }, 100)
   }
 
@@ -56,7 +62,11 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   function applyGamePublic(payload: GamePublicState) {
+    if (Number.isFinite(payload.serverNow)) {
+      serverTimeOffsetMs.value = payload.serverNow - Date.now()
+    }
     gamePublic.value = payload
+    now.value = getAlignedNow()
     startTimer()
   }
 
@@ -85,6 +95,8 @@ export const useRoomStore = defineStore('room', () => {
     gamePrivate.value = null
     toasts.value = []
     chat.value = []
+    serverTimeOffsetMs.value = 0
+    now.value = Date.now()
   }
 
   // Auto-start timer on store load

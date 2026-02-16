@@ -57,6 +57,18 @@ type GameRuntime = {
   }
 }
 
+type VoiceTurnInfo = {
+  roomId: string
+  gameId: string
+  phase: GamePublicState['phase']
+  isSpeechPhase: boolean
+  activeSpeakerSeat: number | null
+  activeSpeakerUserId: string | null
+  seat: number
+  userId: string
+  isCurrentSpeaker: boolean
+}
+
 const actionSchema = z.object({
   actionType: z.string().min(1),
   payload: z.any(),
@@ -67,6 +79,36 @@ async function loadGame(gameId: string): Promise<GameRuntime | null> {
   const raw = await redis.get(`gamert:${gameId}`)
   if (!raw) return null
   return JSON.parse(String(raw)) as GameRuntime
+}
+
+async function getVoiceTurnInfoInternal(roomId: string, userId: string): Promise<VoiceTurnInfo> {
+  const roomRt = await roomService.getRuntime(roomId)
+  if (!roomRt.gameId) throw new Error('NOT_PLAYING')
+
+  const rt = await loadGame(roomRt.gameId)
+  if (!rt) throw new Error('GAME_NOT_FOUND')
+
+  const me = rt.players.find((x) => x.userId === userId)
+  if (!me) throw new Error('NOT_IN_GAME')
+
+  const activeSpeakerSeat = rt.activeSpeakerSeat ?? null
+  const activeSpeakerUserId = activeSpeakerSeat == null
+    ? null
+    : (rt.players.find((x) => x.seat === activeSpeakerSeat)?.userId ?? null)
+
+  const isSpeechPhase = rt.phase === 'day_speech' || rt.phase === 'sheriff_speech'
+
+  return {
+    roomId,
+    gameId: roomRt.gameId,
+    phase: rt.phase,
+    isSpeechPhase,
+    activeSpeakerSeat,
+    activeSpeakerUserId,
+    seat: me.seat,
+    userId,
+    isCurrentSpeaker: activeSpeakerSeat != null && me.seat === activeSpeakerSeat,
+  }
 }
 
 async function saveGame(rt: GameRuntime) {
@@ -100,6 +142,7 @@ function toPublic(rt: GameRuntime): GamePublicState {
     roomId: rt.roomId,
     phase: rt.phase,
     dayNo: rt.dayNo,
+    serverNow: nowMs(),
     phaseEndsAt: rt.phaseEndsAt,
     players: rt.players
       .map((p) => ({
@@ -694,6 +737,15 @@ export const gameService = {
     return rt.players.filter(p => p.role === 'werewolf').map(p => p.userId)
   },
 
+  async getVoiceTurnInfo(roomId: string, userId: string) {
+    return await getVoiceTurnInfoInternal(roomId, userId)
+  },
+
+  async canSpeakVoiceNow(roomId: string, userId: string) {
+    const info = await getVoiceTurnInfoInternal(roomId, userId)
+    return info.isSpeechPhase && info.isCurrentSpeaker
+  },
+
   async startGame(roomId: string, requesterUserId: string) {
     const roomRt = await roomService.getRuntime(roomId)
     if (roomRt.ownerUserId !== requesterUserId) throw new Error('仅房主可开局')
@@ -794,16 +846,11 @@ export const gameService = {
 
     if (channel === 'wolf') {
       if (p.role !== 'werewolf') throw new Error('你不是狼人')
-      // Wolf chat allowed at night? Yes. Allowed at day? Typically yes, unless restricted. 
-      // Let's allow Wolf Chat at any time for typical online Werewolf rules.
     } else {
-      // Public Chat Restrictions
-      if (rt.activeSpeakerSeat != null) {
-        if (p.seat !== rt.activeSpeakerSeat) {
-          throw new Error('未到发言阶段')
-        }
-      } else if (rt.phase === 'night') {
-        throw new Error('夜晚无法发言')
+      const isSpeechPhase = rt.phase === 'day_speech' || rt.phase === 'sheriff_speech'
+      if (!isSpeechPhase) throw new Error('仅发言阶段可公开发言')
+      if (rt.activeSpeakerSeat == null || p.seat !== rt.activeSpeakerSeat) {
+        throw new Error('未到你的发言回合')
       }
     }
 
@@ -842,12 +889,7 @@ export const gameService = {
         if (!Number.isFinite(targetSeat)) throw new Error('目标无效')
         rt.night.wolfVotes[userId] = targetSeat
         pushEvent(rt, 'action_submitted', { actionType: 'night.wolfKill', seat: actor.seat })
-
-        const aliveWolves = rt.players.filter((p) => p.isAlive && p.role === 'werewolf')
-        const wolvesDone = aliveWolves.length > 0 && aliveWolves.every((w) => rt.night.wolfVotes[w.userId] != null)
-        if (wolvesDone) {
-          advanceNightRole(rt)
-        }
+        // 夜间统一按计时推进，避免不同客户端看到不同节奏。
       }
 
       if (parsed.actionType === 'night.seerCheck') {
@@ -860,8 +902,6 @@ export const gameService = {
         pushEvent(rt, 'action_submitted', { actionType: 'night.seerCheck', seat: actor.seat })
         pushHint(rt, userId, `你查验了 ${targetSeat} 号：${target.role === 'werewolf' ? '狼人' : '好人'}`)
         privateUserIds.add(userId)
-
-        advanceNightRole(rt)
       }
 
       if (parsed.actionType === 'night.guardProtect') {
@@ -876,8 +916,6 @@ export const gameService = {
           rt.night.guardTarget = 0 // Explicit no-op
         }
         pushEvent(rt, 'action_submitted', { actionType: 'night.guardProtect', seat: actor.seat })
-
-        advanceNightRole(rt)
       }
 
       if (parsed.actionType === 'night.witch.save') {
@@ -907,8 +945,6 @@ export const gameService = {
           rt.night.witchPoisonTarget = undefined
         }
         pushEvent(rt, 'action_submitted', { actionType: 'night.witch.poison', seat: actor.seat })
-
-        advanceNightRole(rt)
       }
     }
 

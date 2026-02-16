@@ -1,3 +1,4 @@
+import type { WebRtcSignalPayload } from '../../shared/types'
 const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
 async function request<T>(path: string, options: RequestInit & { token?: string } = {}): Promise<T> {
@@ -132,5 +133,12 @@ export const api = {
   },
   async wsGamePoll(token: string, roomId: string) {
     return await request<any>('/api/ws/game/poll', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsWebrtcSignal(token: string, roomId: string, targetUserId: string, signal: WebRtcSignalPayload) {
+    return await request<any>('/api/ws/webrtc/signal', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ roomId, targetUserId, signal }),
+    })
   },
 }

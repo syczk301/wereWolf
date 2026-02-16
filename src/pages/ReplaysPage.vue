@@ -42,31 +42,51 @@ onMounted(load)
     <div class="mx-auto max-w-md">
       <div class="sticky top-0 z-10 -mx-4 mb-3 border-b border-white/10 bg-[#0b1020]/95 px-4 py-3 backdrop-blur">
         <div class="flex items-center justify-between">
-          <div class="text-base font-semibold">回放</div>
+          <div class="text-base font-semibold">
+            回放
+          </div>
           <div class="flex gap-2">
-            <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80" @click="load">
+            <button
+              class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80"
+              @click="load"
+            >
               刷新
             </button>
-            <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80" @click="router.push('/lobby')">
+            <button
+              class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80"
+              @click="router.push('/lobby')"
+            >
               返回
             </button>
           </div>
         </div>
       </div>
 
-      <div v-if="error" class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+      <div
+        v-if="error"
+        class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+      >
         {{ error }}
       </div>
 
-      <div v-if="loading" class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+      <div
+        v-if="loading"
+        class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70"
+      >
         加载中…
       </div>
 
-      <div v-else-if="records.length === 0" class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+      <div
+        v-else-if="records.length === 0"
+        class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70"
+      >
         暂无回放。
       </div>
 
-      <div v-else class="space-y-2">
+      <div
+        v-else
+        class="space-y-2"
+      >
         <button
           v-for="r in records"
           :key="r.id"
@@ -74,11 +94,19 @@ onMounted(load)
           @click="router.push(`/replays/${r.id}`)"
         >
           <div class="flex items-center justify-between">
-            <div class="text-sm font-medium">{{ r.roomName }}</div>
-            <div class="text-xs text-white/60">{{ fmtDur(r.durationMs) }}</div>
+            <div class="text-sm font-medium">
+              {{ r.roomName }}
+            </div>
+            <div class="text-xs text-white/60">
+              {{ fmtDur(r.durationMs) }}
+            </div>
           </div>
-          <div class="mt-1 text-xs text-white/60">{{ new Date(r.createdAt).toLocaleString() }}</div>
-          <div class="mt-1 text-xs text-white/80">{{ r.resultSummary }}</div>
+          <div class="mt-1 text-xs text-white/60">
+            {{ new Date(r.createdAt).toLocaleString() }}
+          </div>
+          <div class="mt-1 text-xs text-white/80">
+            {{ r.resultSummary }}
+          </div>
         </button>
       </div>
     </div>

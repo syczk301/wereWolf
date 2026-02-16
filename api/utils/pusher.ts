@@ -31,7 +31,7 @@ export async function emitToRoom(roomId: string, event: string, data: any) {
 
 /** Sanitize userId for Pusher channel name (no colons allowed) */
 function sanitizeChannel(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_\-]/g, '-')
+  return id.replace(/[^a-zA-Z0-9_-]/g, '-')
 }
 
 /** Emit to a specific user */

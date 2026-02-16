@@ -57,6 +57,8 @@ export type GamePublicState = {
   roomId: RoomId
   phase: Phase
   dayNo: number
+  // Server timestamp used to calibrate client countdown clocks
+  serverNow: number
   phaseEndsAt: number
   players: SeatPublicState[]
   publicLog: { id: string; at: number; text: string }[]
@@ -111,4 +113,24 @@ export type ReplayRecord = {
 export type ReplayDetail = {
   record: ReplayRecord
   events: ReplayEvent[]
+}
+
+export type WebRtcSignalType = 'offer' | 'answer' | 'candidate'
+
+export type WebRtcSignalPayload = {
+  type: WebRtcSignalType
+  sdp?: unknown
+  candidate?: unknown
+}
+
+export type WebRtcSignalRequest = {
+  roomId: RoomId
+  targetUserId: UserId
+  signal: WebRtcSignalPayload
+}
+
+export type WebRtcSignalEvent = {
+  roomId: RoomId
+  fromUserId: UserId
+  signal: WebRtcSignalPayload
 }

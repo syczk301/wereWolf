@@ -4,6 +4,7 @@
  */
 import { Router, type Response } from 'express'
 import { nanoid } from 'nanoid'
+import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { roomService } from '../services/roomService.js'
@@ -11,6 +12,16 @@ import { gameService } from '../services/gameService.js'
 import { emitToRoom, emitToUser } from '../utils/pusher.js'
 
 const router = Router()
+
+const webrtcSignalSchema = z.object({
+  roomId: z.string().min(1),
+  targetUserId: z.string().min(1),
+  signal: z.object({
+    type: z.enum(['offer', 'answer', 'candidate']),
+    sdp: z.any().optional(),
+    candidate: z.any().optional(),
+  }),
+})
 
 /* ---- room:join ---- */
 router.post(
@@ -182,6 +193,64 @@ router.post(
       }
     }
     res.json({ success: true, roomState: updates.roomState, gamePublic: updates.gamePublic, gamePrivate: actorPriv })
+  }),
+)
+
+/* ---- webrtc:signal ---- */
+router.post(
+  '/webrtc/signal',
+  asyncHandler(async (req: AuthedRequest, res: Response) => {
+    const parsed = webrtcSignalSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.json({ success: true, ignored: true, reason: 'INVALID_SIGNAL_PAYLOAD' })
+      return
+    }
+
+    const { roomId, targetUserId, signal } = parsed.data
+    const fromUserId = req.user.id
+    if (targetUserId === fromUserId) {
+      res.json({ success: true, ignored: true, reason: 'TARGET_INVALID' })
+      return
+    }
+
+    let fromInfo: Awaited<ReturnType<typeof gameService.getVoiceTurnInfo>>
+    let targetInfo: Awaited<ReturnType<typeof gameService.getVoiceTurnInfo>>
+    try {
+      fromInfo = await gameService.getVoiceTurnInfo(roomId, fromUserId)
+      targetInfo = await gameService.getVoiceTurnInfo(roomId, targetUserId)
+    } catch {
+      res.json({ success: true, ignored: true, reason: 'SIGNAL_STALE' })
+      return
+    }
+
+    if (fromInfo.gameId !== targetInfo.gameId) {
+      res.json({ success: true, ignored: true, reason: 'NOT_IN_GAME' })
+      return
+    }
+    if (!fromInfo.isSpeechPhase || !fromInfo.activeSpeakerUserId) {
+      res.json({ success: true, ignored: true, reason: 'NOT_SPEECH_PHASE' })
+      return
+    }
+
+    const speakerId = fromInfo.activeSpeakerUserId
+    const fromIsSpeaker = fromUserId === speakerId
+    const targetIsSpeaker = targetUserId === speakerId
+
+    if (signal.type === 'offer') {
+      if (!fromIsSpeaker || targetIsSpeaker) {
+        res.json({ success: true, ignored: true, reason: 'OFFER_FORBIDDEN' })
+        return
+      }
+    } else {
+      // answer/candidate: only speaker<->listener pair is allowed
+      if ((fromIsSpeaker && targetIsSpeaker) || (!fromIsSpeaker && !targetIsSpeaker)) {
+        res.json({ success: true, ignored: true, reason: 'PAIR_FORBIDDEN' })
+        return
+      }
+    }
+
+    await emitToUser(targetUserId, 'webrtc:signal', { roomId, fromUserId, signal }).catch(() => {})
+    res.json({ success: true })
   }),
 )
 

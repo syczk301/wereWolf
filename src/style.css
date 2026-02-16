@@ -8,21 +8,35 @@
     Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   line-height: 1.5;
   font-weight: 400;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: radial-gradient(circle at 50% 0%, #1a233b 0%, #0b1020 100%);
   color: rgba(234, 240, 255, 0.92);
-  min-height: 100vh;
+  min-height: 100dvh;
+  font-size: 16px;
+  overscroll-behavior: none;
 }
 
 input, button, textarea, select {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
 }
 
 /* Custom Animations */
@@ -33,6 +47,15 @@ input, button, textarea, select {
 
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out forwards;
 }
 
 /* Glassmorphism Utilities */
@@ -47,18 +70,65 @@ input, button, textarea, select {
   border-color: rgba(255, 255, 255, 0.15);
 }
 
+/* Safe Area Utilities */
+.pb-safe {
+  padding-bottom: max(0px, var(--safe-bottom));
+}
+
+.pt-safe {
+  padding-top: max(0px, var(--safe-top));
+}
+
+.pl-safe {
+  padding-left: max(0px, var(--safe-left));
+}
+
+.pr-safe {
+  padding-right: max(0px, var(--safe-right));
+}
+
+.px-safe {
+  padding-left: max(0px, var(--safe-left));
+  padding-right: max(0px, var(--safe-right));
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus visible for keyboard nav */
+:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.6);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible) {
+  outline: none;
+}
+
+#trae-badge-plugin {
+  display: none !important;
 }

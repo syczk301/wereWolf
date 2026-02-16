@@ -71,27 +71,51 @@ onUnmounted(stop)
     <div class="mx-auto max-w-md">
       <div class="sticky top-0 z-10 -mx-4 mb-3 border-b border-white/10 bg-[#0b1020]/95 px-4 py-3 backdrop-blur">
         <div class="flex items-center justify-between">
-          <div class="text-base font-semibold">回放详情</div>
+          <div class="text-base font-semibold">
+            回放详情
+          </div>
           <div class="flex gap-2">
-            <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80" @click="load">刷新</button>
-            <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80" @click="router.push('/replays')">返回</button>
+            <button
+              class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80"
+              @click="load"
+            >
+              刷新
+            </button>
+            <button
+              class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80"
+              @click="router.push('/replays')"
+            >
+              返回
+            </button>
           </div>
         </div>
       </div>
 
-      <div v-if="error" class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+      <div
+        v-if="error"
+        class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+      >
         {{ error }}
       </div>
 
-      <div v-if="loading || !detail" class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+      <div
+        v-if="loading || !detail"
+        class="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70"
+      >
         加载中…
       </div>
 
       <template v-else>
         <div class="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div class="text-sm font-medium">{{ detail.record.roomName }}</div>
-          <div class="mt-1 text-xs text-white/60">{{ new Date(detail.record.createdAt).toLocaleString() }}</div>
-          <div class="mt-2 text-sm text-white/80">{{ detail.record.resultSummary }}</div>
+          <div class="text-sm font-medium">
+            {{ detail.record.roomName }}
+          </div>
+          <div class="mt-1 text-xs text-white/60">
+            {{ new Date(detail.record.createdAt).toLocaleString() }}
+          </div>
+          <div class="mt-2 text-sm text-white/80">
+            {{ detail.record.resultSummary }}
+          </div>
 
           <div class="mt-3 flex items-center gap-2">
             <button
@@ -114,19 +138,30 @@ onUnmounted(stop)
             </button>
           </div>
 
-          <div class="mt-3 text-xs text-white/60">进度：{{ cursor + 1 }}/{{ detail.events.length }}</div>
+          <div class="mt-3 text-xs text-white/60">
+            进度：{{ cursor + 1 }}/{{ detail.events.length }}
+          </div>
         </div>
 
         <div class="mt-3 rounded-xl border border-white/10 bg-white/5 p-4">
-          <div class="mb-2 text-sm font-medium">当前事件</div>
-          <div v-if="currentEvent" class="rounded-lg border border-white/10 bg-black/20 p-3">
-            <div class="text-xs text-white/60">{{ fmt(currentEvent.t) }} · {{ currentEvent.type }}</div>
+          <div class="mb-2 text-sm font-medium">
+            当前事件
+          </div>
+          <div
+            v-if="currentEvent"
+            class="rounded-lg border border-white/10 bg-black/20 p-3"
+          >
+            <div class="text-xs text-white/60">
+              {{ fmt(currentEvent.t) }} · {{ currentEvent.type }}
+            </div>
             <pre class="mt-2 overflow-auto text-[11px] text-white/80">{{ JSON.stringify(currentEvent.payload, null, 2) }}</pre>
           </div>
         </div>
 
         <div class="mt-3 rounded-xl border border-white/10 bg-white/5 p-4">
-          <div class="mb-2 text-sm font-medium">事件时间线</div>
+          <div class="mb-2 text-sm font-medium">
+            事件时间线
+          </div>
           <div class="max-h-[45vh] space-y-2 overflow-auto pr-1">
             <button
               v-for="(e, idx) in detail.events"
@@ -137,7 +172,9 @@ onUnmounted(stop)
             >
               <div class="flex items-center justify-between">
                 <div>{{ fmt(e.t) }} · {{ e.type }}</div>
-                <div class="text-white/50">#{{ idx + 1 }}</div>
+                <div class="text-white/50">
+                  #{{ idx + 1 }}
+                </div>
               </div>
             </button>
           </div>
