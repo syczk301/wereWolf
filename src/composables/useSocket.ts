@@ -28,6 +28,7 @@ type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
 const socketRef = ref<AppSocket | null>(null) as Ref<AppSocket | null>
 const isConnected = ref(false)
+const SOCKET_BASE = (import.meta.env.VITE_SOCKET_BASE ?? import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
 export function useSocket() {
   const session = useSessionStore()
@@ -42,7 +43,7 @@ export function useSocket() {
 
     if (!session.token) throw new Error('NO_TOKEN')
 
-    const s: AppSocket = io('/', {
+    const s: AppSocket = io(SOCKET_BASE || '/', {
       transports: ['websocket'],
       auth: { token: session.token },
       autoConnect: true,

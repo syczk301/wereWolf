@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
 import roomRoutes from './routes/rooms.js'
 import replayRoutes from './routes/replays.js'
+import wsRoutes from './routes/ws.js'
 import { requireAuth } from './middleware/requireAuth.js'
 
 // for esm mode
@@ -50,6 +51,7 @@ app.use(
 app.use('/api', requireAuth)
 app.use('/api/rooms', roomRoutes)
 app.use('/api/replays', replayRoutes)
+app.use('/api/ws', wsRoutes)
 
 /**
  * error handler middleware

@@ -166,6 +166,11 @@ function toPrivate(rt: GameRuntime, userId: string): GamePrivateState {
     selectedTargetSeat = rt.day.votes[userId]
   }
 
+  // Wolves can see their teammates
+  const wolfTeam = p.role === 'werewolf'
+    ? rt.players.filter(x => x.role === 'werewolf').map(x => ({ seat: x.seat, nickname: x.nickname, isAlive: x.isAlive }))
+    : undefined
+
   return {
     role: p.role,
     seat: p.seat,
@@ -175,6 +180,7 @@ function toPrivate(rt: GameRuntime, userId: string): GamePrivateState {
     },
     selectedTargetSeat,
     witchSaveDecision,
+    wolfTeam,
   }
 }
 
@@ -232,6 +238,9 @@ function startPhase(rt: GameRuntime, phase: GameRuntime['phase']) {
     rt.activeRole = 'werewolf'
     rt.activeSpeakerSeat = null
     rt.speakingQueue = []
+    pushLog(rt, '天黑请闭眼')
+    pushLog(rt, '狼人请睁眼')
+    rt.phaseEndsAt = nowMs() + NIGHT_ROLE_DURATION_SEC * 1000
   } else if (phase === 'sheriff_election') {
     rt.activeRole = null
     rt.activeSpeakerSeat = null
@@ -264,7 +273,11 @@ function startPhase(rt: GameRuntime, phase: GameRuntime['phase']) {
     rt.speakingQueue = []
   }
 
-  triggerBotAction(rt) // Trigger bots immediately if it's their turn
+  // Night phase: bots act on timeout so all players see role announcements.
+  // Other phases: bots act immediately.
+  if (phase !== 'night') {
+    triggerBotAction(rt)
+  }
 }
 
 
@@ -340,22 +353,42 @@ function resolveSheriffVote(rt: GameRuntime) {
   }
 }
 
+const NIGHT_ROLE_LABELS: Record<string, string> = {
+  werewolf: '狼人请睁眼',
+  seer: '预言家请睁眼',
+  witch: '女巫请睁眼',
+  guard: '守卫请睁眼',
+}
+
+const NIGHT_ROLE_CLOSE_LABELS: Record<string, string> = {
+  werewolf: '狼人请闭眼',
+  seer: '预言家请闭眼',
+  witch: '女巫请闭眼',
+  guard: '守卫请闭眼',
+}
+
+// Minimum seconds each night sub-role stage lasts (so players can see the announcement)
+const NIGHT_ROLE_DURATION_SEC = 8
+
 function advanceNightRole(rt: GameRuntime) {
   const sequence = ['werewolf', 'seer', 'witch', 'guard']
   const currentIndex = sequence.indexOf(rt.activeRole || '')
 
+  // Log "X请闭眼" for current role
+  if (rt.activeRole && NIGHT_ROLE_CLOSE_LABELS[rt.activeRole]) {
+    pushLog(rt, NIGHT_ROLE_CLOSE_LABELS[rt.activeRole])
+  }
+
   for (let i = currentIndex + 1; i < sequence.length; i++) {
     const nextRole = sequence[i]
-    // Check if any alive players have this role
     const hasRole = rt.players.some(p => p.isAlive && p.role === nextRole)
     if (hasRole) {
       rt.activeRole = nextRole
-      // Refresh timer for Each role? 
-      // For now we keep the same main timer but maybe slightly adjust it.
-      // Usually each role has its own time, but to keep it simple we just continue.
-      // If we want each role to have full time, we'd need to reset phaseEndsAt.
-      rt.phaseEndsAt = nowMs() + (rt.timers.nightSeconds / 3 * 1000) // Give partial time for sub-stages
-      triggerBotAction(rt)
+      pushLog(rt, NIGHT_ROLE_LABELS[nextRole] || `${nextRole}行动`)
+      pushEvent(rt, 'phase_changed', { phase: 'night', dayNo: rt.dayNo, activeRole: nextRole })
+      rt.phaseEndsAt = nowMs() + NIGHT_ROLE_DURATION_SEC * 1000
+      // Do NOT call triggerBotAction here -- let the timer expire first so
+      // all players see the role announcement. Bots act on next timeout tick.
       return
     }
   }
@@ -510,13 +543,13 @@ function validateRoleConfig(playerCount: number, rc: GameRuntime['roleConfig']) 
 }
 
 function triggerBotAction(rt: GameRuntime) {
-  // 1. NIGHT ACTIONS
+  // 1. NIGHT ACTIONS -- bots only perform their action, never call advanceNightRole.
+  // Phase advancement is handled by the timeout mechanism so all players see each role stage.
   if (rt.phase === 'night' && rt.activeRole) {
     const bots = rt.players.filter((p) => p.isBot && p.isAlive && p.role === rt.activeRole)
     if (bots.length === 0) return
 
     if (rt.activeRole === 'werewolf') {
-      let acted = false
       for (const bot of bots) {
         if (rt.night.wolfVotes[bot.userId] == null) {
           const targets = rt.players.filter((p) => p.isAlive && p.role !== 'werewolf').map((p) => p.seat)
@@ -524,14 +557,8 @@ function triggerBotAction(rt: GameRuntime) {
             const target = targets[Math.floor(Math.random() * targets.length)]
             rt.night.wolfVotes[bot.userId] = target
             pushEvent(rt, 'action_submitted', { actionType: 'night.wolfKill', seat: bot.seat })
-            acted = true
           }
         }
-      }
-
-      const aliveWolves = rt.players.filter((p) => p.isAlive && p.role === 'werewolf')
-      if (aliveWolves.length > 0 && aliveWolves.every((w) => rt.night.wolfVotes[w.userId] != null)) {
-        advanceNightRole(rt)
       }
     } else if (rt.activeRole === 'seer') {
       const bot = bots[0]
@@ -541,7 +568,6 @@ function triggerBotAction(rt: GameRuntime) {
           const target = targets[Math.floor(Math.random() * targets.length)]
           rt.night.seerTarget = target
           pushEvent(rt, 'action_submitted', { actionType: 'night.seerCheck', seat: bot.seat })
-          advanceNightRole(rt)
         }
       }
     } else if (rt.activeRole === 'guard') {
@@ -552,12 +578,10 @@ function triggerBotAction(rt: GameRuntime) {
           const target = targets[Math.floor(Math.random() * targets.length)]
           rt.night.guardTarget = target
           pushEvent(rt, 'action_submitted', { actionType: 'night.guardProtect', seat: bot.seat })
-          advanceNightRole(rt)
         }
       }
     } else if (rt.activeRole === 'witch') {
       const bot = bots[0]
-      // Determine victim
       const voteTargets = Object.values(rt.night.wolfVotes)
       let victimSeat: number | null = null
       if (voteTargets.length) {
@@ -576,7 +600,6 @@ function triggerBotAction(rt: GameRuntime) {
       }
 
       if (!saved && !rt.night.witchPoisonUsed && rt.night.witchPoisonTarget == null) {
-        // Small chance to poison random non-self
         if (Math.random() < 0.15) {
           const targets = rt.players.filter((p) => p.isAlive && p.seat !== bot.seat).map((p) => p.seat)
           if (targets.length) {
@@ -586,7 +609,6 @@ function triggerBotAction(rt: GameRuntime) {
           }
         }
       }
-      advanceNightRole(rt)
     }
   }
 
@@ -1033,6 +1055,8 @@ export const gameService = {
     const privateUserIds = new Set<string>()
 
     if (rt.phase === 'night' && rt.activeRole) {
+      // Let bots act before advancing (they didn't act during their window)
+      triggerBotAction(rt)
       advanceNightRole(rt)
     } else if (rt.phase === 'sheriff_election') {
       startPhase(rt, 'sheriff_speech')

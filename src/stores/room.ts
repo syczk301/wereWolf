@@ -75,6 +75,7 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   function pushChat(msg: { id: string; at: number; sender: { id: string; nickname: string }; text: string }) {
+    if (chat.value.some((m) => m.id === msg.id)) return
     chat.value = [...chat.value, msg].slice(-80)
   }
 

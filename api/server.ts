@@ -1,16 +1,12 @@
 /**
- * local server entry file, for local development
+ * Local server entry file, for local development.
+ * Socket.IO replaced by Pusher — timers run server-side.
  */
 import http from 'http'
-import { Server as SocketIOServer } from 'socket.io'
 import app from './app.js'
 import { envConfig } from '../shared/env.js'
-import { initSocket } from './socket.js'
-import { roomService } from './services/roomService.js'
+import { startTimers, stopTimers } from './realtime.js'
 
-/**
- * start server with port
- */
 const server = http.createServer(app)
 
 server.on('error', (err) => {
@@ -18,37 +14,15 @@ server.on('error', (err) => {
   process.exit(1)
 })
 
-const io = new SocketIOServer(server, {
-  cors: {
-    origin: true,
-    credentials: true,
-  },
-})
-
-await initSocket(io)
-
 server.listen(envConfig.port, () => {
   console.log(`Server ready on port ${envConfig.port}`)
-
-  // Clean up expired rooms every 10 seconds
-  setInterval(() => {
-    roomService.checkAndExpireRooms(io).catch(console.error)
-  }, 10000)
+  startTimers()
 })
 
-/**
- * close server
- */
-// Gracefully handle shutdown steps
 function shutdown(signal: string) {
   console.log(`Received ${signal}, shutting down...`)
+  stopTimers()
 
-  // Close Socket.IO first
-  io.close(() => {
-    console.log('Socket.IO closed')
-  })
-
-  // Close HTTP server
   server.close((err) => {
     if (err) {
       console.error('Error closing server:', err)
@@ -62,7 +36,6 @@ function shutdown(signal: string) {
     }
   })
 
-  // Force close after timeout if lagging
   setTimeout(() => {
     console.error('Could not close connections in time, forcefully shutting down')
     process.exit(1)

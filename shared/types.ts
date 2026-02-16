@@ -75,12 +75,12 @@ export type GamePrivateState = {
   }
   selectedTargetSeat?: number | null
   witchSaveDecision?: boolean
-  // 新增女巫信息
   witchInfo?: {
-    nightVictimSeat?: number | null // 昨夜死者
-    saveUsed: boolean    // 解药已用
-    poisonUsed: boolean  // 毒药已用
+    nightVictimSeat?: number | null
+    saveUsed: boolean
+    poisonUsed: boolean
   }
+  wolfTeam?: { seat: number; nickname: string; isAlive: boolean }[]
 }
 
 export type ReplayEventType =

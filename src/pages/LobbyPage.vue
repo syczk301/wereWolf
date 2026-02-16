@@ -3,14 +3,12 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/utils/api'
 import { useSessionStore } from '@/stores/session'
-import { useSocket } from '@/composables/useSocket'
 import { useRoomStore } from '@/stores/room'
 
 type RoomSummary = { id: string; name: string; status: string; playerCount: number; maxPlayers: number; roomNumber?: number }
 
 const router = useRouter()
 const session = useSessionStore()
-const { connect } = useSocket()
 const room = useRoomStore()
 
 const rooms = ref<RoomSummary[]>([])
@@ -84,12 +82,6 @@ async function onLogout() {
 }
 
 onMounted(() => {
-  try {
-    connect()
-  } catch (e) {
-    console.error('Socket connection failed:', e)
-  }
-  
   loadRooms()
   setInterval(loadRooms, 3000)
 })

@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useSocket } from '@/composables/useSocket'
+import { usePusher } from '@/composables/usePusher'
 import { useRoomStore } from '@/stores/room'
 import { useSessionStore } from '@/stores/session'
+import { api } from '@/utils/api'
+import type { Channel } from 'pusher-js'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const room = useRoomStore()
-const { connect, socket } = useSocket()
+const { connect: connectPusher, subscribeRoom, subscribeUser, unsubscribeRoom, unsubscribeUser, disconnect: disconnectPusher, isConnected } = usePusher()
+
+let roomChannel: Channel | null = null
+let userChannel: Channel | null = null
 
 const roomId = computed(() => String(route.params.roomId || ''))
 const connected = ref(false)
 const joining = ref(false)
+const token = computed(() => session.token ?? '')
 
 const chatText = ref('')
 const chatChannel = ref<'public' | 'wolf'>('public')
@@ -21,6 +27,12 @@ const chatChannel = ref<'public' | 'wolf'>('public')
 const isOwner = computed(() => {
   if (!room.roomState || !session.user) return false
   return room.roomState.ownerUserId === session.user.id
+})
+
+const meReady = computed(() => {
+  if (!room.roomState || !session.user) return false
+  const me = room.roomState.members?.find((m: any) => m.user?.id === session.user!.id)
+  return !!me?.isReady
 })
 
 const meSeat = computed(() => room.gamePrivate?.seat ?? null)
@@ -85,13 +97,15 @@ function syncLocalConfig() {
 }
 
 function emitConfig() {
-  if (!socket.value) return
-  socket.value.emit('room:config:update', { roomId: roomId.value, roleConfig: localRoleConfig.value, timers: localTimers.value })
+  api.wsRoomConfig(token.value, roomId.value, localRoleConfig.value, localTimers.value).then((resp: any) => {
+    if (resp.roomState) room.applyRoom(resp.roomState)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '更新配置失败'))
 }
 
 function setReady(ready: boolean) {
-  if (!socket.value) return
-  socket.value.emit('room:ready', { roomId: roomId.value, ready })
+  api.wsRoomReady(token.value, roomId.value, ready).then((resp: any) => {
+    if (resp.roomState) room.applyRoom(resp.roomState)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '设置准备失败'))
 }
 
 // 弹窗状态
@@ -100,9 +114,6 @@ const neededBots = ref(0)
 const addingBots = ref(false)
 
 function startGame() {
-  if (!socket.value) return
-  
-  // 先检查人数
   const members = room.roomState?.members || []
   const playerCount = members.filter(m => m.user).length
   const maxPlayers = room.roomState?.maxPlayers || 9
@@ -113,22 +124,28 @@ function startGame() {
     return
   }
   
-  socket.value.emit('room:start', { roomId: roomId.value })
+  api.wsRoomStart(token.value, roomId.value).then((resp: any) => {
+    if (resp.roomState) room.applyRoom(resp.roomState)
+    if (resp.gamePublic) room.applyGamePublic(resp.gamePublic)
+    if (resp.gamePrivate) room.applyGamePrivate(resp.gamePrivate)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '开局失败'))
 }
 
-function confirmAddBots() {
-  if (!socket.value) return
+async function confirmAddBots() {
   addingBots.value = true
-  
-  // 使用后端一键补员，无需前端循环等待
-  socket.value.emit('room:bot:fill', { roomId: roomId.value })
-
-  // 给予短暂缓冲等待后端处理并更新状态，然后自动开局
-  setTimeout(() => {
+  try {
+    const fillResp = await api.wsRoomBotFill(token.value, roomId.value)
+    if (fillResp.roomState) room.applyRoom(fillResp.roomState)
+    const startResp = await api.wsRoomStart(token.value, roomId.value)
+    if (startResp.roomState) room.applyRoom(startResp.roomState)
+    if (startResp.gamePublic) room.applyGamePublic(startResp.gamePublic)
+    if (startResp.gamePrivate) room.applyGamePrivate(startResp.gamePrivate)
+  } catch (e: any) {
+    room.pushToast('error', e?.message ?? '操作失败')
+  } finally {
     addingBots.value = false
     showBotConfirm.value = false
-    socket.value?.emit('room:start', { roomId: roomId.value })
-  }, 600)
+  }
 }
 
 function cancelBotConfirm() {
@@ -137,88 +154,102 @@ function cancelBotConfirm() {
 }
 
 function addBot() {
-  if (!socket.value) return
-  socket.value.emit('room:bot:add', { roomId: roomId.value })
+  api.wsRoomBotAdd(token.value, roomId.value).then((resp: any) => {
+    if (resp.roomState) room.applyRoom(resp.roomState)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '添加机器人失败'))
 }
 
 function sendChat() {
-  if (!socket.value) return
   const text = chatText.value.trim()
   if (!text) return
-  socket.value.emit('chat:send', { roomId: roomId.value, text, channel: chatChannel.value })
   chatText.value = ''
+  api.wsChatSend(token.value, roomId.value, text, chatChannel.value).then((resp: any) => {
+    if (resp.msg) room.pushChat(resp.msg)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '发送失败'))
 }
 
 function submitAction(actionType: string, payload: any) {
-  if (!socket.value) return
-  socket.value.emit('game:action', { roomId: roomId.value, actionType, payload })
+  api.wsGameAction(token.value, roomId.value, actionType, payload).then((resp: any) => {
+    if (resp.roomState) room.applyRoom(resp.roomState)
+    if (resp.gamePublic) room.applyGamePublic(resp.gamePublic)
+    if (resp.gamePrivate) room.applyGamePrivate(resp.gamePrivate)
+  }).catch((e: any) => room.pushToast('error', e?.message ?? '操作失败'))
 }
 
 function leaveRoom() {
-  if (!socket.value) return
-  socket.value.emit('room:leave', { roomId: roomId.value })
+  api.wsRoomLeave(token.value, roomId.value).catch(() => {})
   router.push('/lobby')
 }
 
-function setupSocketListeners(s: any) {
-  s.on('room:state', (payload: any) => {
+function setupPusherListeners() {
+  const rid = roomId.value
+  const uid = session.user?.id
+  if (!rid || !uid) return
+
+  connectPusher()
+  roomChannel = subscribeRoom(rid)
+  userChannel = subscribeUser(uid)
+
+  roomChannel.bind('room:state', (payload: any) => {
     room.applyRoom(payload)
     syncLocalConfig()
   })
-  s.on('game:state', (payload: any) => {
+  roomChannel.bind('game:state', (payload: any) => {
     room.applyGamePublic(payload)
   })
-  s.on('game:private', (payload: any) => {
-    room.applyGamePrivate(payload)
-  })
-  s.on('chat:new', (payload: any) => {
+  roomChannel.bind('chat:new', (payload: any) => {
     room.pushChat(payload)
   })
-  s.on('toast', (payload: any) => {
+  roomChannel.bind('toast', (payload: any) => {
     room.pushToast(payload.type, payload.message)
   })
-  s.on('room:expired', async () => {
+  roomChannel.bind('room:expired', async () => {
     room.pushToast('info', '房间超时解散')
     room.reset()
     await router.replace('/lobby')
   })
-  s.on('room:dissolved', async () => {
+  roomChannel.bind('room:dissolved', async () => {
     room.pushToast('info', '房间已解散')
     room.reset()
     await router.replace('/lobby')
   })
+
+  userChannel.bind('game:private', (payload: any) => {
+    room.applyGamePrivate(payload)
+  })
+  userChannel.bind('chat:new', (payload: any) => {
+    room.pushChat(payload)
+  })
+}
+
+function teardownPusher() {
+  const rid = roomId.value
+  const uid = session.user?.id
+  if (rid) unsubscribeRoom(rid)
+  if (uid) unsubscribeUser(uid)
+  roomChannel = null
+  userChannel = null
 }
 
 async function join() {
   if (joining.value) return
-  // If we already have state matching this room, show as connected
   if (room.roomState && room.roomState.id === roomId.value) {
     connected.value = true
   }
   
   joining.value = true
   try {
-    const s = connect()
-    
-    // 注册事件监听器
-    setupSocketListeners(s)
-    
-    // 立即发送 join，不等待连接
-    // socket.io 会自动在连接后发送
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('JOIN_TIMEOUT'))
-      }, 5000)
-      
-      s.emit('room:join', { roomId: roomId.value }, (resp) => {
-        clearTimeout(timeout)
-        if (resp && 'ok' in resp && resp.ok === true) {
-          connected.value = true
-          resolve()
-        }
-        else reject(new Error((resp as any)?.error ?? 'JOIN_FAILED'))
-      })
-    })
+    setupPusherListeners()
+
+    const resp = await api.wsRoomJoin(token.value, roomId.value)
+    connected.value = true
+
+    if (resp.roomState) {
+      room.applyRoom(resp.roomState)
+      syncLocalConfig()
+    }
+    if (resp.gamePublic) room.applyGamePublic(resp.gamePublic)
+    if (resp.gamePrivate) room.applyGamePrivate(resp.gamePrivate)
   } catch (e: any) {
     room.pushToast('error', e?.message ?? '加入失败')
     await router.replace('/lobby')
@@ -353,21 +384,36 @@ watch(() => room.gamePublic?.phase, (newPhase) => {
 
 const nowTs = ref(Date.now())
 let interval: any = null
+let pollInterval: any = null
+
+async function pollGameState() {
+  if (!token.value || !roomId.value) return
+  try {
+    const resp = await api.wsGamePoll(token.value, roomId.value)
+    if (resp.roomState) room.applyRoom(resp.roomState)
+    if (resp.gamePublic) room.applyGamePublic(resp.gamePublic)
+    if (resp.gamePrivate) room.applyGamePrivate(resp.gamePrivate)
+  } catch {
+    // ignore poll errors
+  }
+}
 
 onMounted(() => {
   room.reset()
   join()
   interval = setInterval(() => {
     nowTs.value = Date.now()
-    // Explicitly update room's now if needed, though room should have its own.
-    // We'll use local nowTs for UI consistency if store refresh is flaky.
     room.now = nowTs.value 
   }, 1000)
+  // Poll game state every 2 seconds to compensate for serverless timer limitations
+  pollInterval = setInterval(pollGameState, 2000)
 })
 
 onUnmounted(() => {
+  teardownPusher()
   room.reset()
   if (interval) clearInterval(interval)
+  if (pollInterval) clearInterval(pollInterval)
 })
 </script>
 
@@ -635,7 +681,19 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="identity-card-body">
-              <p v-if="room.gamePrivate?.role === 'werewolf'" class="text-red-300/80">你是狼人。每晚与同伴商议并选择击杀目标。白天请隐藏身份。</p>
+              <p v-if="room.gamePrivate?.role === 'werewolf'" class="text-red-300/80">
+                你是狼人。每晚与同伴商议并选择击杀目标。白天请隐藏身份。
+              </p>
+              <div v-if="room.gamePrivate?.wolfTeam?.length" class="mt-2 rounded-lg border border-red-500/20 bg-red-500/10 p-2">
+                <div class="text-xs text-red-400/70 mb-1">狼人同伴:</div>
+                <div class="flex flex-wrap gap-2">
+                  <span v-for="w in room.gamePrivate.wolfTeam" :key="w.seat"
+                    class="text-sm px-2 py-0.5 rounded"
+                    :class="w.isAlive ? 'bg-red-500/20 text-red-300' : 'bg-gray-500/20 text-gray-400 line-through'">
+                    {{ w.seat }}号 {{ w.nickname }}
+                  </span>
+                </div>
+              </div>
               <p v-else-if="room.gamePrivate?.role === 'seer'" class="text-violet-300/80">你是预言家。每晚可以查验一人的身份（好人/狼人）。</p>
               <p v-else-if="room.gamePrivate?.role === 'witch'" class="text-emerald-300/80">你是女巫。拥有一瓶解药和一瓶毒药，每种可用一次。</p>
               <p v-else-if="room.gamePrivate?.role === 'guard'" class="text-blue-300/80">你是守卫。每晚守护一人免受狼人袭击，不可连续守同一人。</p>
@@ -653,7 +711,7 @@ onUnmounted(() => {
             </div>
             <div class="game-log-body">
               <div v-if="room.gamePublic?.publicLog?.length" class="space-y-1.5">
-                <div v-for="log in room.gamePublic.publicLog.slice(-5)" :key="log.id" class="log-entry">
+                <div v-for="log in room.gamePublic.publicLog.slice(-15)" :key="log.id" class="log-entry">
                   <span class="log-time">{{ new Date(log.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
                   <span class="log-text">{{ log.text }}</span>
                 </div>
@@ -797,10 +855,15 @@ onUnmounted(() => {
           <div class="bottom-action-bar">
             <div class="mx-auto flex max-w-md gap-3">
               <button
-                class="flex-1 rounded-xl border border-white/20 bg-white/5 px-4 py-3.5 text-sm font-medium text-white transition-all duration-300 hover:bg-white/10 hover:border-white/30"
-                @click="setReady(true)"
+                :class="[
+                  'flex-1 rounded-xl border px-4 py-3.5 text-sm font-medium transition-all duration-300',
+                  meReady
+                    ? 'border-green-400/40 bg-green-500/20 text-green-300 hover:bg-red-500/20 hover:border-red-400/40 hover:text-red-300'
+                    : 'border-white/20 bg-white/5 text-white hover:bg-white/10 hover:border-white/30'
+                ]"
+                @click="setReady(!meReady)"
               >
-                准备
+                {{ meReady ? '取消准备' : '准备' }}
               </button>
               <button
                 v-if="isOwner"

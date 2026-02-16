@@ -4,6 +4,7 @@ import { envConfig } from '../../shared/env.js'
 
 let client: MongoClient | null = null
 let forceMemory = false
+let connectPromise: Promise<MongoClient> | null = null
 
 type MemDoc = Record<string, any> & { _id: string }
 type MemCollection = {
@@ -186,18 +187,35 @@ export type DbLike = Pick<Db, 'collection'>
 export async function getMongoClient(): Promise<MongoClient> {
   if (forceMemory) return { db: () => memDb } as any
   if (client) return client
-  client = new MongoClient(envConfig.mongodbUri)
-  try {
-    await client.connect()
-  } catch {
-    client = null
-    forceMemory = true
-    return { db: () => memDb } as any
-  }
-  return client
+  if (connectPromise) return connectPromise
+
+  const nextClient = new MongoClient(envConfig.mongodbUri)
+  connectPromise = nextClient
+    .connect()
+    .then(() => {
+      client = nextClient
+      return nextClient
+    })
+    .catch((err) => {
+      client = null
+      forceMemory = true
+      console.warn(
+        `[mongo] failed to connect, fallback to in-memory mode (${err?.name ?? 'MongoError'}). Data will not persist across restarts.`,
+      )
+      return { db: () => memDb } as any
+    })
+    .finally(() => {
+      connectPromise = null
+    })
+
+  return connectPromise
 }
 
 export async function getDb() {
   const c = await getMongoClient()
   return (c as any).db() as DbLike
+}
+
+export function isUsingMemoryDb() {
+  return forceMemory
 }

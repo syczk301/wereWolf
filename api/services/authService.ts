@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken'
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
 import { envConfig } from '../../shared/env.js'
-import { getDb } from '../db/mongo.js'
+import { getDb, isUsingMemoryDb } from '../db/mongo.js'
 import { getRedis } from '../db/redis.js'
 
 const jwtPayloadSchema = z.object({
@@ -48,7 +48,12 @@ export async function loginUser(input: { emailOrUsername: string; password: stri
     emailOrUsername: input.emailOrUsername,
   })
 
-  if (!user) throw new Error('账号或密码错误')
+  if (!user) {
+    if (isUsingMemoryDb()) {
+      throw new Error('账号或密码错误（当前服务未连接 MongoDB，重启后账号会丢失，请先注册）')
+    }
+    throw new Error('账号或密码错误')
+  }
 
   const ok = await bcrypt.compare(input.password, user.passwordHash)
   if (!ok) throw new Error('账号或密码错误')

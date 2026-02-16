@@ -382,12 +382,15 @@ export const roomService = {
     return rt
   },
 
-  async checkAndExpireRooms(io?: any) {
+  async checkAndExpireRooms() {
     try {
       const redis = await getRedis()
       const db = await getDb()
       const now = Date.now()
       const twoMinutesAgo = new Date(now - 120000)
+
+      // Lazy-import pusher to avoid circular deps
+      const { emitToRoom } = await import('../utils/pusher.js')
 
       // Part 1: Clean Redis-based runtimes
       const keys = await redis.keys('roomrt:*')
@@ -402,12 +405,10 @@ export const roomService = {
         const createdAt = rt.createdAt || 0
         const diff = now - createdAt
 
-        if (diff > 120000) {
+        if (diff > 600000) {
           console.log(`[Expiry] Room ${rt.roomId} expired. Age: ${Math.floor(diff / 1000)}s`)
-          if (io) {
-            io.to(rt.roomId).emit('toast', { type: 'info', message: '房间长时间未开始，已自动解散' })
-            io.to(rt.roomId).emit('room:expired', { roomId: rt.roomId })
-          }
+          await emitToRoom(rt.roomId, 'toast', { type: 'info', message: '房间长时间未开始，已自动解散' })
+          await emitToRoom(rt.roomId, 'room:expired', { roomId: rt.roomId })
           await redis.del(key)
           await db.collection<RoomDoc>('rooms').deleteOne({ _id: rt.roomId })
         }

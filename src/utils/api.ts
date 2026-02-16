@@ -1,4 +1,4 @@
-const API_BASE = ''
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
 async function request<T>(path: string, options: RequestInit & { token?: string } = {}): Promise<T> {
   const headers: Record<string, string> = {
@@ -100,5 +100,37 @@ export const api = {
   async getReplay(token: string, replayId: string) {
     const data = await request<any>(`/api/replays/${replayId}`, { method: 'GET', token })
     return { detail: data.detail as any }
+  },
+
+  // ---- Realtime (replacing Socket.IO) ----
+  async wsRoomJoin(token: string, roomId: string) {
+    return await request<any>('/api/ws/room/join', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsRoomLeave(token: string, roomId: string) {
+    return await request<any>('/api/ws/room/leave', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsRoomReady(token: string, roomId: string, ready: boolean) {
+    return await request<any>('/api/ws/room/ready', { method: 'POST', token, body: JSON.stringify({ roomId, ready }) })
+  },
+  async wsRoomConfig(token: string, roomId: string, roleConfig: any, timers: any) {
+    return await request<any>('/api/ws/room/config', { method: 'POST', token, body: JSON.stringify({ roomId, roleConfig, timers }) })
+  },
+  async wsRoomBotAdd(token: string, roomId: string) {
+    return await request<any>('/api/ws/room/bot/add', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsRoomBotFill(token: string, roomId: string) {
+    return await request<any>('/api/ws/room/bot/fill', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsRoomStart(token: string, roomId: string) {
+    return await request<any>('/api/ws/room/start', { method: 'POST', token, body: JSON.stringify({ roomId }) })
+  },
+  async wsChatSend(token: string, roomId: string, text: string, channel?: string) {
+    return await request<any>('/api/ws/chat/send', { method: 'POST', token, body: JSON.stringify({ roomId, text, channel }) })
+  },
+  async wsGameAction(token: string, roomId: string, actionType: string, payload: any) {
+    return await request<any>('/api/ws/game/action', { method: 'POST', token, body: JSON.stringify({ roomId, actionType, payload }) })
+  },
+  async wsGamePoll(token: string, roomId: string) {
+    return await request<any>('/api/ws/game/poll', { method: 'POST', token, body: JSON.stringify({ roomId }) })
   },
 }
