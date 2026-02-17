@@ -1,6 +1,14 @@
 import type { WebRtcSignalPayload } from '../../shared/types'
 const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
+export type AdminManagedUser = {
+  id: string
+  emailOrUsername: string
+  nickname: string
+  createdAt: string
+  lastLoginAt: string
+}
+
 async function request<T>(path: string, options: RequestInit & { token?: string } = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -81,6 +89,28 @@ export const api = {
   async getMe(token: string) {
     const data = await request<any>('/api/auth/me', { method: 'GET', token })
     return { user: data.user as { id: string; nickname: string; isGuest: boolean } }
+  },
+
+  async listAdminUsers(token: string, query = '', limit = 200) {
+    const params = new URLSearchParams()
+    if (query.trim()) params.set('q', query.trim())
+    params.set('limit', String(limit))
+    const q = params.toString()
+    const data = await request<any>(`/api/admin/users${q ? `?${q}` : ''}`, { method: 'GET', token })
+    return { users: data.users as AdminManagedUser[] }
+  },
+
+  async updateAdminUser(token: string, userId: string, input: { nickname?: string; password?: string }) {
+    const data = await request<any>(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify(input),
+    })
+    return { user: data.user as AdminManagedUser }
+  },
+
+  async deleteAdminUser(token: string, userId: string) {
+    await request<any>(`/api/admin/users/${userId}`, { method: 'DELETE', token })
   },
 
   async listRooms(token: string) {

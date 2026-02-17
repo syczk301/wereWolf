@@ -497,9 +497,16 @@ const selectedTtsVoice = ref<any>(null)
 const hasShownTtsHint = ref(false)
 let cueAudioCtx: AudioContext | null = null
 let ttsUnlockHandler: (() => void) | null = null
+let ttsUnlockListenerEvents: string[] = []
 let ttsVisibilityHandler: (() => void) | null = null
 let ttsVoicesChangedHandler: (() => void) | null = null
 let isSpeechQueueRunning = false
+let ttsUnlockInProgress = false
+let ttsLastUnlockAt = 0
+let pendingRoleOpenTimer: ReturnType<typeof setTimeout> | null = null
+const recentSpeechAt = new Map<string, number>()
+const TTS_UNLOCK_DEBOUNCE_MS = 400
+const SPEECH_DEDUPE_WINDOW_MS = 2200
 
 function playCueTone() {
   if (!voiceRtc.audioUnlocked.value) return
@@ -534,11 +541,34 @@ function resolveTtsVoice() {
 
 function clearTtsUnlockListeners() {
   if (!ttsUnlockHandler) return
-  document.removeEventListener('pointerdown', ttsUnlockHandler)
-  document.removeEventListener('touchstart', ttsUnlockHandler)
-  document.removeEventListener('click', ttsUnlockHandler)
-  document.removeEventListener('keydown', ttsUnlockHandler)
+  for (const eventName of ttsUnlockListenerEvents) {
+    document.removeEventListener(eventName, ttsUnlockHandler)
+  }
+  ttsUnlockListenerEvents = []
   ttsUnlockHandler = null
+}
+
+function clearPendingRoleOpenTimer() {
+  if (!pendingRoleOpenTimer) return
+  clearTimeout(pendingRoleOpenTimer)
+  pendingRoleOpenTimer = null
+}
+
+function shouldSkipSpeech(text: string) {
+  const now = Date.now()
+  const lastAt = recentSpeechAt.get(text) ?? 0
+  if (now - lastAt < SPEECH_DEDUPE_WINDOW_MS) {
+    return true
+  }
+  recentSpeechAt.set(text, now)
+  if (recentSpeechAt.size > 48) {
+    for (const [key, at] of recentSpeechAt) {
+      if (now - at > SPEECH_DEDUPE_WINDOW_MS * 4) {
+        recentSpeechAt.delete(key)
+      }
+    }
+  }
+  return false
 }
 
 function buildCloudTtsUrls(text: string) {
@@ -579,13 +609,27 @@ async function speakWithNative(text: string) {
   return await new Promise<boolean>((resolve) => {
     let settled = false
     let started = false
-    let timeout: any = null
-    const done = (ok: boolean) => {
+    let startTimeout: ReturnType<typeof setTimeout> | null = null
+    let hardTimeout: ReturnType<typeof setTimeout> | null = null
+    const hardTimeoutMs = Math.min(12000, Math.max(6000, text.length * 380))
+
+    const done = (ok: boolean, forceCancel = false) => {
       if (settled) return
       settled = true
-      if (timeout) {
-        clearTimeout(timeout)
-        timeout = null
+      if (startTimeout) {
+        clearTimeout(startTimeout)
+        startTimeout = null
+      }
+      if (hardTimeout) {
+        clearTimeout(hardTimeout)
+        hardTimeout = null
+      }
+      if (forceCancel) {
+        try {
+          synth.cancel()
+        } catch {
+          // ignore cancel failure
+        }
       }
       resolve(ok)
     }
@@ -602,10 +646,17 @@ async function speakWithNative(text: string) {
     utterance.onend = () => done(true)
     utterance.onerror = () => done(false)
 
-    timeout = setTimeout(() => done(started), 2000)
+    startTimeout = setTimeout(() => {
+      if (!started) {
+        done(false, true)
+      }
+    }, 1800)
+    hardTimeout = setTimeout(() => {
+      done(started, true)
+    }, hardTimeoutMs)
+
     try {
       synth.resume()
-      synth.cancel()
       synth.speak(utterance)
     } catch {
       done(false)
@@ -640,43 +691,59 @@ function flushQueuedSpeech() {
 }
 
 function unlockTtsByGesture() {
+  const now = Date.now()
+  if (ttsUnlockInProgress) return
+  if (now - ttsLastUnlockAt < TTS_UNLOCK_DEBOUNCE_MS) return
+  ttsUnlockInProgress = true
+  ttsLastUnlockAt = now
+
   // Always unlock WebRTC playback first; it should not depend on TTS availability.
   void unlockVoicePlayback()
-  if (!window.speechSynthesis) {
-    ttsUnlocked.value = true
-    clearTtsUnlockListeners()
-    flushQueuedSpeech()
-    return
-  }
+
   try {
+    if (!window.speechSynthesis) {
+      ttsUnlocked.value = true
+      clearTtsUnlockListeners()
+      flushQueuedSpeech()
+      return
+    }
+
     const synth = window.speechSynthesis
     synth.resume()
-    const probe = new SpeechSynthesisUtterance('语音已启用')
+
+    // Keep probe silent to avoid mixing with game narration.
+    const probe = new SpeechSynthesisUtterance('。')
     probe.lang = 'zh-CN'
-    probe.volume = 0.2
+    probe.volume = 0
     probe.rate = 1.0
     probe.pitch = 1.0
-    synth.cancel()
     synth.speak(probe)
+
     ttsUnlocked.value = true
     resolveTtsVoice()
     flushQueuedSpeech()
+    if (voiceRtc.audioUnlocked.value && ttsUnlocked.value) {
+      clearTtsUnlockListeners()
+    }
   } catch {
     // Keep listener for next gesture
     return
-  }
-  if (voiceRtc.audioUnlocked.value && ttsUnlocked.value) {
-    clearTtsUnlockListeners()
+  } finally {
+    ttsUnlockInProgress = false
   }
 }
 
 function setupSpeechSupport() {
   if (!ttsUnlocked.value || !voiceRtc.audioUnlocked.value) {
+    clearTtsUnlockListeners()
     ttsUnlockHandler = () => unlockTtsByGesture()
-    document.addEventListener('pointerdown', ttsUnlockHandler)
-    document.addEventListener('touchstart', ttsUnlockHandler)
-    document.addEventListener('click', ttsUnlockHandler)
-    document.addEventListener('keydown', ttsUnlockHandler)
+    const supportsPointer = typeof window !== 'undefined' && 'PointerEvent' in window
+    ttsUnlockListenerEvents = supportsPointer
+      ? ['pointerdown', 'keydown']
+      : ['touchstart', 'click', 'keydown']
+    for (const eventName of ttsUnlockListenerEvents) {
+      document.addEventListener(eventName, ttsUnlockHandler)
+    }
   }
 
   if (!window.speechSynthesis) return
@@ -701,7 +768,6 @@ function manualEnableAudio() {
       return
     }
     room.pushToast('info', '声音已启用')
-    speak('语音播报测试')
   }, 120)
 }
 
@@ -726,6 +792,7 @@ function teardownSpeechSupport() {
 
 function speak(text: string) {
   if (!text) return
+  if (shouldSkipSpeech(text)) return
   queuedSpeechQueue.value.push(text)
   if (queuedSpeechQueue.value.length > 16) {
     queuedSpeechQueue.value = queuedSpeechQueue.value.slice(-16)
@@ -771,6 +838,9 @@ function getRoleClass(role?: string): string {
 
 // 监听阶段变化进行语音播报（大阶段）
 watch(() => room.gamePublic?.phase, (newPhase) => {
+  if (newPhase !== 'night') {
+    clearPendingRoleOpenTimer()
+  }
   if (!newPhase) return
   if (newPhase === 'night') {
     speak('天黑请闭眼')
@@ -782,11 +852,15 @@ watch(() => room.gamePublic?.phase, (newPhase) => {
 })
 
 watch(() => room.gamePublic?.activeRole, (newRole, oldRole) => {
+  clearPendingRoleOpenTimer()
   if (room.gamePublic?.phase !== 'night') return
   if (!newRole) return
   if (oldRole) speak(`${roleLabels[oldRole] || oldRole}请闭眼`)
-  setTimeout(() => {
+  pendingRoleOpenTimer = setTimeout(() => {
+    const gp = room.gamePublic
+    if (!gp || gp.phase !== 'night' || gp.activeRole !== newRole) return
     speak(`${roleLabels[newRole] || newRole}请睁眼`)
+    pendingRoleOpenTimer = null
   }, 1500)
 })
 
@@ -844,6 +918,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearPendingRoleOpenTimer()
   teardownSpeechSupport()
   voiceRtc.dispose()
   teardownPusher()

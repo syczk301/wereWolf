@@ -3,8 +3,15 @@ import type { Channel } from 'pusher-js'
 import { ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 
-const PUSHER_KEY = import.meta.env.VITE_PUSHER_KEY || 'e588157482ef4b62e466'
-const PUSHER_CLUSTER = import.meta.env.VITE_PUSHER_CLUSTER || 'us3'
+function cleanEnv(value: string | undefined, fallback: string) {
+  const normalized = String(value ?? '')
+    .replace(/(?:\\r\\n|\\n|\\r)+$/g, '')
+    .trim()
+  return normalized || fallback
+}
+
+const PUSHER_KEY = cleanEnv(import.meta.env.VITE_PUSHER_KEY, 'e588157482ef4b62e466')
+const PUSHER_CLUSTER = cleanEnv(import.meta.env.VITE_PUSHER_CLUSTER, 'us3')
 
 let pusher: Pusher | null = null
 

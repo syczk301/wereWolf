@@ -15,6 +15,7 @@ const rooms = ref<RoomSummary[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const searchQuery = ref('')
+const canShowAdmin = ref(false)
 
 const filteredRooms = computed(() => {
   if (!searchQuery.value.trim()) return rooms.value
@@ -83,8 +84,26 @@ async function onLogout() {
   await router.replace('/auth')
 }
 
+function goAdmin() {
+  router.push('/admin/users')
+}
+
+async function checkAdminAccess() {
+  if (!session.token) {
+    canShowAdmin.value = false
+    return
+  }
+  try {
+    await api.listAdminUsers(session.token, '', 1)
+    canShowAdmin.value = true
+  } catch {
+    canShowAdmin.value = false
+  }
+}
+
 onMounted(() => {
   loadRooms()
+  checkAdminAccess()
   pollTimer = setInterval(loadRooms, 3000)
 })
 
@@ -192,6 +211,14 @@ onUnmounted(() => {
           </div>
           <span class="text-xs text-white/70 max-w-[60px] truncate">{{ session.user?.nickname }}</span>
         </div>
+        <button
+          v-if="canShowAdmin"
+          class="h-10 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/70 transition-all duration-200 hover:bg-white/10 hover:text-white/90"
+          aria-label="账号管理"
+          @click="goAdmin"
+        >
+          后台
+        </button>
         <button
           class="h-10 w-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-white/50 transition-all duration-200 hover:bg-white/10 hover:text-white/80"
           aria-label="退出登录"
@@ -531,6 +558,32 @@ onUnmounted(() => {
             />
           </svg>
           <span class="text-[10px] font-medium">大厅</span>
+        </button>
+        <button
+          v-if="canShowAdmin"
+          class="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-white/40 transition-colors duration-200 hover:text-white/60"
+          @click="router.push('/admin/users')"
+        >
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 14c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5z"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 20v-1a6 6 0 0112 0v1"
+            />
+          </svg>
+          <span class="text-[10px] font-medium">后台</span>
         </button>
         <button
           class="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-white/40 transition-colors duration-200 hover:text-white/60"

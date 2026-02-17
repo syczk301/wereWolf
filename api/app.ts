@@ -12,6 +12,7 @@ import path from 'path'
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
+import adminRoutes from './routes/admin.js'
 import roomRoutes from './routes/rooms.js'
 import replayRoutes from './routes/replays.js'
 import wsRoutes from './routes/ws.js'
@@ -49,6 +50,7 @@ app.use(
 )
 
 app.use('/api', requireAuth)
+app.use('/api/admin', adminRoutes)
 app.use('/api/rooms', roomRoutes)
 app.use('/api/replays', replayRoutes)
 app.use('/api/ws', wsRoutes)

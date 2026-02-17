@@ -2,13 +2,19 @@ import Pusher from 'pusher'
 
 let instance: Pusher | null = null
 
+function cleanEnv(name: string) {
+  return String(process.env[name] ?? '')
+    .replace(/(?:\\r\\n|\\n|\\r)+$/g, '')
+    .trim()
+}
+
 export function getPusher(): Pusher {
   if (!instance) {
     instance = new Pusher({
-      appId: process.env.PUSHER_APP_ID!,
-      key: process.env.PUSHER_KEY!,
-      secret: process.env.PUSHER_SECRET!,
-      cluster: process.env.PUSHER_CLUSTER!,
+      appId: cleanEnv('PUSHER_APP_ID'),
+      key: cleanEnv('PUSHER_KEY'),
+      secret: cleanEnv('PUSHER_SECRET'),
+      cluster: cleanEnv('PUSHER_CLUSTER'),
       useTLS: true,
     })
   }

@@ -4,6 +4,7 @@ import LobbyPage from '@/pages/LobbyPage.vue'
 import RoomPage from '@/pages/RoomPage.vue'
 import ReplaysPage from '@/pages/ReplaysPage.vue'
 import ReplayDetailPage from '@/pages/ReplayDetailPage.vue'
+import AdminUsersPage from '@/pages/AdminUsersPage.vue'
 import { useSessionStore } from '@/stores/session'
 
 const router = createRouter({
@@ -15,6 +16,7 @@ const router = createRouter({
     { path: '/room/:roomId', name: 'room', component: RoomPage },
     { path: '/replays', name: 'replays', component: ReplaysPage },
     { path: '/replays/:replayId', name: 'replayDetail', component: ReplayDetailPage },
+    { path: '/admin/users', name: 'adminUsers', component: AdminUsersPage },
   ],
 })
 
