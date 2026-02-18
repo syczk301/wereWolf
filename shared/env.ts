@@ -28,6 +28,13 @@ const schema = z.object({
   REDIS_URL: z.string().min(1).optional(),
   ADMIN_USER_IDS: z.string().optional(),
   ADMIN_USERNAMES: z.string().optional(),
+  EMAIL_PROVIDER: z.string().optional(),
+  EMAIL_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  EMAIL_OTP_TTL_SECONDS: z.coerce.number().int().min(60).max(1800).optional(),
+  EMAIL_OTP_RESEND_SECONDS: z.coerce.number().int().min(10).max(600).optional(),
+  EMAIL_OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).optional(),
+  EMAIL_OTP_DAILY_LIMIT: z.coerce.number().int().min(1).max(500).optional(),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -44,4 +51,15 @@ export const envConfig = {
   redisUrl: sanitizeEnvString(parsed.data.REDIS_URL) ?? 'redis://127.0.0.1:6379',
   adminUserIds: parseCommaSeparated(parsed.data.ADMIN_USER_IDS),
   adminUsernames: parseCommaSeparated(parsed.data.ADMIN_USERNAMES).map((item) => item.toLowerCase()),
+  emailProvider: (
+    (sanitizeEnvString(parsed.data.EMAIL_PROVIDER)?.toLowerCase() ?? '') === 'resend'
+      ? 'resend'
+      : 'mock'
+  ) as 'mock' | 'resend',
+  emailApiKey: sanitizeEnvString(parsed.data.EMAIL_API_KEY) ?? '',
+  emailFrom: sanitizeEnvString(parsed.data.EMAIL_FROM) ?? '',
+  emailOtpTtlSeconds: parsed.data.EMAIL_OTP_TTL_SECONDS ?? 300,
+  emailOtpResendSeconds: parsed.data.EMAIL_OTP_RESEND_SECONDS ?? 60,
+  emailOtpMaxAttempts: parsed.data.EMAIL_OTP_MAX_ATTEMPTS ?? 5,
+  emailOtpDailyLimit: parsed.data.EMAIL_OTP_DAILY_LIMIT ?? 20,
 }

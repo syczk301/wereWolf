@@ -34,8 +34,21 @@ export const useSessionStore = defineStore('session', () => {
     localStorage.setItem('werewolf_token', resp.accessToken)
   }
 
-  async function register(emailOrUsername: string, nickname: string, password: string) {
-    const resp = await api.register({ emailOrUsername, nickname, password })
+  async function register(input: {
+    username: string
+    email: string
+    nickname: string
+    password: string
+    emailCode: string
+  }) {
+    const resp = await api.register({
+      username: input.username,
+      email: input.email,
+      nickname: input.nickname,
+      password: input.password,
+      emailCode: input.emailCode,
+      emailOrUsername: input.username,
+    })
     token.value = resp.accessToken
     user.value = resp.user
     localStorage.setItem('werewolf_token', resp.accessToken)
@@ -61,9 +74,22 @@ export const useSessionStore = defineStore('session', () => {
     localStorage.setItem('werewolf_token', resp.accessToken)
   }
 
-  async function upgradeToAccount(emailOrUsername: string, password: string, nickname?: string) {
+  async function upgradeToAccount(input: {
+    username: string
+    email: string
+    password: string
+    nickname?: string
+    emailCode: string
+  }) {
     if (!token.value) throw new Error('NO_TOKEN')
-    const resp = await api.upgrade(token.value, { emailOrUsername, password, nickname })
+    const resp = await api.upgrade(token.value, {
+      username: input.username,
+      email: input.email,
+      password: input.password,
+      nickname: input.nickname,
+      emailCode: input.emailCode,
+      emailOrUsername: input.username,
+    })
     token.value = resp.accessToken
     user.value = resp.user
     localStorage.setItem('werewolf_token', resp.accessToken)

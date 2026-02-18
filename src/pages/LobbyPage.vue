@@ -174,25 +174,16 @@ onUnmounted(() => {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="1.5"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           >
-            <path d="M12 3C7 3 3 7.5 3 12c0 3.5 2 6.5 5 8l1-2c-2-1-3.5-3.5-3.5-6C5.5 8.5 8.5 5.5 12 5.5S18.5 8.5 18.5 12c0 2.5-1.5 5-3.5 6l1 2c3-1.5 5-4.5 5-8 0-4.5-4-9-9-9z" />
-            <circle
-              cx="9"
-              cy="11"
-              r="1.5"
-              fill="currentColor"
-            />
-            <circle
-              cx="15"
-              cy="11"
-              r="1.5"
-              fill="currentColor"
-            />
-            <path
-              d="M9 15c1.5 1.5 4.5 1.5 6 0"
-              stroke-linecap="round"
-            />
+            <path d="M7.5 3L6 8C4 9.5 3 11.5 3 14C3 18.4 7 22 12 22C17 22 21 18.4 21 14C21 11.5 20 9.5 18 8L16.5 3L13.5 8.5L12 7.5L10.5 8.5Z" />
+            <circle cx="9.5" cy="13" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="14.5" cy="13" r="1.5" fill="currentColor" stroke="none" />
+            <path d="M10 17Q12 18 14 17" stroke-width="1.2" />
+            <path d="M10.5 17.5L10 20" stroke-width="1.2" />
+            <path d="M13.5 17.5L14 20" stroke-width="1.2" />
           </svg>
         </div>
         <div>

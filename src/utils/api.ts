@@ -4,6 +4,8 @@ const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 export type AdminManagedUser = {
   id: string
   emailOrUsername: string
+  username?: string
+  email?: string
   nickname: string
   createdAt: string
   lastLoginAt: string
@@ -49,7 +51,36 @@ async function request<T>(path: string, options: RequestInit & { token?: string 
 }
 
 export const api = {
-  async register(input: { emailOrUsername: string; password: string; nickname: string }) {
+  async sendRegisterEmailCode(email: string, purpose: 'register' | 'upgrade' = 'register') {
+    const data = await request<any>('/api/auth/email/code/send', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose }),
+    })
+    return {
+      resendAfterSeconds: Number(data.resendAfterSeconds ?? 60),
+      expireAfterSeconds: Number(data.expireAfterSeconds ?? 300),
+    }
+  },
+
+  async sendResetPasswordCode(email: string) {
+    const data = await request<any>('/api/auth/email/code/send', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose: 'reset_password' }),
+    })
+    return {
+      resendAfterSeconds: Number(data.resendAfterSeconds ?? 60),
+      expireAfterSeconds: Number(data.expireAfterSeconds ?? 300),
+    }
+  },
+
+  async register(input: {
+    username: string
+    email: string
+    password: string
+    nickname: string
+    emailCode: string
+    emailOrUsername?: string
+  }) {
     const data = await request<any>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -65,6 +96,13 @@ export const api = {
     return { accessToken: data.accessToken as string, user: data.user as { id: string; nickname: string; isGuest: boolean } }
   },
 
+  async resetPasswordByEmail(input: { email: string; emailCode: string; newPassword: string }) {
+    await request<any>('/api/auth/password/reset', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
   async logout(token: string) {
     await request<any>('/api/auth/logout', { method: 'POST', token })
   },
@@ -77,7 +115,14 @@ export const api = {
     return { accessToken: data.accessToken as string, user: data.user as { id: string; nickname: string; isGuest: boolean } }
   },
 
-  async upgrade(token: string, input: { emailOrUsername: string; password: string; nickname?: string }) {
+  async upgrade(token: string, input: {
+    username: string
+    email: string
+    password: string
+    nickname?: string
+    emailCode: string
+    emailOrUsername?: string
+  }) {
     const data = await request<any>('/api/auth/upgrade', {
       method: 'POST',
       token,

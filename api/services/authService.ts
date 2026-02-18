@@ -15,7 +15,9 @@ const jwtPayloadSchema = z.object({
 
 const fallbackUserSchema = z.object({
   id: z.string().min(1),
-  emailOrUsername: z.string().min(1),
+  username: z.string().min(1).optional(),
+  email: z.string().min(1).optional(),
+  emailOrUsername: z.string().min(1).optional(),
   nickname: z.string().min(1),
   passwordHash: z.string().min(1),
   createdAt: z.string().min(1),
@@ -25,7 +27,9 @@ const fallbackUserSchema = z.object({
 type FallbackUser = z.infer<typeof fallbackUserSchema>
 type UserDoc = {
   _id: string
-  emailOrUsername: string
+  username?: string
+  email?: string
+  emailOrUsername?: string
   nickname: string
   passwordHash: string
   createdAt: Date
@@ -35,14 +39,18 @@ type UserDoc = {
 export type ManagedUser = {
   id: string
   emailOrUsername: string
+  username?: string
+  email?: string
   nickname: string
   createdAt: string
   lastLoginAt: string
 }
 
 const FALLBACK_USER_ACCOUNT_PREFIX = 'auth:user:account:'
-const FALLBACK_USER_ID_PREFIX = 'auth:user:id:'
 const FALLBACK_USER_LEGACY_PREFIX = 'auth:user:'
+const FALLBACK_USER_ID_PREFIX = 'auth:user:id:'
+const FALLBACK_USER_USERNAME_PREFIX = 'auth:user:username:'
+const FALLBACK_USER_EMAIL_PREFIX = 'auth:user:email:'
 
 const adminUserIdSet = new Set((envConfig.adminUserIds ?? []).map((id) => id.trim()).filter(Boolean))
 const adminUsernameSet = new Set((envConfig.adminUsernames ?? []).map((name) => name.trim().toLowerCase()).filter(Boolean))
@@ -51,16 +59,40 @@ function escapeRegex(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function fallbackUserAccountKey(emailOrUsername: string) {
-  return `${FALLBACK_USER_ACCOUNT_PREFIX}${encodeURIComponent(emailOrUsername)}`
+function toRedisString(value: string | Buffer) {
+  return typeof value === 'string' ? value : value.toString('utf8')
 }
 
-function fallbackUserLegacyKey(emailOrUsername: string) {
-  return `${FALLBACK_USER_LEGACY_PREFIX}${encodeURIComponent(emailOrUsername)}`
+function isEmailLike(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
+
+function normalizeUsername(value: string) {
+  return value.trim()
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function fallbackUserAccountKey(account: string) {
+  return `${FALLBACK_USER_ACCOUNT_PREFIX}${encodeURIComponent(account)}`
+}
+
+function fallbackUserLegacyKey(account: string) {
+  return `${FALLBACK_USER_LEGACY_PREFIX}${encodeURIComponent(account)}`
 }
 
 function fallbackUserIdKey(userId: string) {
   return `${FALLBACK_USER_ID_PREFIX}${userId}`
+}
+
+function fallbackUsernameKey(username: string) {
+  return `${FALLBACK_USER_USERNAME_PREFIX}${encodeURIComponent(username.toLowerCase())}`
+}
+
+function fallbackEmailKey(email: string) {
+  return `${FALLBACK_USER_EMAIL_PREFIX}${encodeURIComponent(email.toLowerCase())}`
 }
 
 function parseFallbackUser(raw: unknown): FallbackUser | null {
@@ -78,14 +110,29 @@ function parseFallbackUser(raw: unknown): FallbackUser | null {
   }
 }
 
-function toRedisString(value: string | Buffer) {
-  return typeof value === 'string' ? value : value.toString('utf8')
+function resolveUserIdentity(user: {
+  username?: string
+  email?: string
+  emailOrUsername?: string
+}) {
+  const username = normalizeUsername(
+    user.username || (user.emailOrUsername && !isEmailLike(user.emailOrUsername) ? user.emailOrUsername : ''),
+  )
+  const email = normalizeEmail(
+    user.email || (user.emailOrUsername && isEmailLike(user.emailOrUsername) ? user.emailOrUsername : ''),
+  )
+  const emailOrUsername = normalizeUsername(user.emailOrUsername || username || email)
+  const primaryAccount = username || emailOrUsername || email
+  return { username, email, emailOrUsername, primaryAccount }
 }
 
 function toManagedUserFromFallback(user: FallbackUser): ManagedUser {
+  const identity = resolveUserIdentity(user)
   return {
     id: user.id,
-    emailOrUsername: user.emailOrUsername,
+    emailOrUsername: identity.emailOrUsername || identity.username || identity.email,
+    username: identity.username || undefined,
+    email: identity.email || undefined,
     nickname: user.nickname,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
@@ -93,23 +140,105 @@ function toManagedUserFromFallback(user: FallbackUser): ManagedUser {
 }
 
 function toManagedUserFromDoc(user: UserDoc): ManagedUser {
+  const identity = resolveUserIdentity(user)
   return {
     id: user._id,
-    emailOrUsername: user.emailOrUsername,
+    emailOrUsername: identity.emailOrUsername || identity.username || identity.email,
+    username: identity.username || undefined,
+    email: identity.email || undefined,
     nickname: user.nickname,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt.toISOString(),
   }
 }
 
-async function getFallbackUserByAccount(emailOrUsername: string): Promise<FallbackUser | null> {
+function buildMongoAccountFilter(rawAccount: string) {
+  const account = rawAccount.trim()
+  const accountLower = account.toLowerCase()
+  return {
+    $or: [
+      { username: { $regex: `^${escapeRegex(account)}$`, $options: 'i' } },
+      { email: accountLower },
+      { emailOrUsername: { $regex: `^${escapeRegex(account)}$`, $options: 'i' } },
+    ],
+  }
+}
+
+function buildMongoIdentityExistsFilter(rawUsername: string, rawEmail: string) {
+  const username = normalizeUsername(rawUsername)
+  const email = normalizeEmail(rawEmail)
+  return {
+    $or: [
+      { username: { $regex: `^${escapeRegex(username)}$`, $options: 'i' } },
+      { email },
+      { emailOrUsername: { $regex: `^${escapeRegex(username)}$`, $options: 'i' } },
+      { emailOrUsername: email },
+    ],
+  }
+}
+
+function buildMongoEmailIdentityFilter(rawEmail: string) {
+  const email = normalizeEmail(rawEmail)
+  return {
+    $or: [
+      { email },
+      { emailOrUsername: { $regex: `^${escapeRegex(email)}$`, $options: 'i' } },
+    ],
+  }
+}
+
+async function getFallbackUserByAccountAlias(account: string): Promise<FallbackUser | null> {
+  const target = account.trim()
+  if (!target) return null
   const redis = await getRedis()
-  const modern = await redis.get(fallbackUserAccountKey(emailOrUsername))
+
+  const modern = await redis.get(fallbackUserAccountKey(target))
   const fromModern = parseFallbackUser(modern)
   if (fromModern) return fromModern
 
-  const legacy = await redis.get(fallbackUserLegacyKey(emailOrUsername))
+  const legacy = await redis.get(fallbackUserLegacyKey(target))
   return parseFallbackUser(legacy)
+}
+
+async function getFallbackUserByLookup(rawAccount: string): Promise<FallbackUser | null> {
+  const account = rawAccount.trim()
+  if (!account) return null
+  const redis = await getRedis()
+
+  if (isEmailLike(account)) {
+    const email = normalizeEmail(account)
+    const emailAliasRaw = await redis.get(fallbackEmailKey(email))
+    if (emailAliasRaw) {
+      const fromEmailIndex = await getFallbackUserByAccountAlias(toRedisString(emailAliasRaw))
+      if (fromEmailIndex) return fromEmailIndex
+    }
+  }
+
+  const usernameAliasRaw = await redis.get(fallbackUsernameKey(account))
+  if (usernameAliasRaw) {
+    const fromUsernameIndex = await getFallbackUserByAccountAlias(toRedisString(usernameAliasRaw))
+    if (fromUsernameIndex) return fromUsernameIndex
+  }
+
+  const directCandidates = Array.from(new Set([account, account.toLowerCase()])).filter(Boolean)
+  for (const candidate of directCandidates) {
+    const byAlias = await getFallbackUserByAccountAlias(candidate)
+    if (byAlias) return byAlias
+  }
+
+  return null
+}
+
+async function getFallbackUserByEmail(rawEmail: string): Promise<FallbackUser | null> {
+  const email = normalizeEmail(rawEmail)
+  if (!email) return null
+
+  const user = await getFallbackUserByLookup(email)
+  if (!user) return null
+
+  const identity = resolveUserIdentity(user)
+  if (!identity.email || identity.email !== email) return null
+  return user
 }
 
 async function listFallbackUsers(): Promise<FallbackUser[]> {
@@ -122,6 +251,8 @@ async function listFallbackUsers(): Promise<FallbackUser[]> {
   for (const keyRaw of keys) {
     const key = toRedisString(keyRaw)
     if (key.startsWith(FALLBACK_USER_ID_PREFIX)) continue
+    if (key.startsWith(FALLBACK_USER_USERNAME_PREFIX)) continue
+    if (key.startsWith(FALLBACK_USER_EMAIL_PREFIX)) continue
     const raw = await redis.get(key)
     const user = parseFallbackUser(raw)
     if (!user || seen.has(user.id)) continue
@@ -135,7 +266,7 @@ async function getFallbackUserById(userId: string): Promise<FallbackUser | null>
   const redis = await getRedis()
   const accountRaw = await redis.get(fallbackUserIdKey(userId))
   if (accountRaw) {
-    const fromIndexedAccount = await getFallbackUserByAccount(toRedisString(accountRaw))
+    const fromIndexedAccount = await getFallbackUserByAccountAlias(toRedisString(accountRaw))
     if (fromIndexedAccount) return fromIndexedAccount
   }
 
@@ -146,18 +277,44 @@ async function getFallbackUserById(userId: string): Promise<FallbackUser | null>
 async function saveFallbackUser(user: FallbackUser) {
   const redis = await getRedis()
   const payload = JSON.stringify(user)
-  await redis.set(fallbackUserAccountKey(user.emailOrUsername), payload)
-  await redis.set(fallbackUserLegacyKey(user.emailOrUsername), payload)
-  await redis.set(fallbackUserIdKey(user.id), user.emailOrUsername)
+  const identity = resolveUserIdentity(user)
+  if (!identity.primaryAccount) throw new Error('INVALID_USER')
+
+  await redis.set(fallbackUserAccountKey(identity.primaryAccount), payload)
+  await redis.set(fallbackUserLegacyKey(identity.primaryAccount), payload)
+  await redis.set(fallbackUserIdKey(user.id), identity.primaryAccount)
+
+  if (identity.emailOrUsername && identity.emailOrUsername !== identity.primaryAccount) {
+    await redis.set(fallbackUserAccountKey(identity.emailOrUsername), payload)
+    await redis.set(fallbackUserLegacyKey(identity.emailOrUsername), payload)
+  }
+
+  if (identity.username) {
+    await redis.set(fallbackUsernameKey(identity.username), identity.primaryAccount)
+  }
+  if (identity.email) {
+    await redis.set(fallbackEmailKey(identity.email), identity.primaryAccount)
+  }
 }
 
 async function deleteFallbackUser(user: FallbackUser) {
   const redis = await getRedis()
-  await redis.del([
-    fallbackUserAccountKey(user.emailOrUsername),
-    fallbackUserLegacyKey(user.emailOrUsername),
-    fallbackUserIdKey(user.id),
-  ])
+  const identity = resolveUserIdentity(user)
+  const keys = new Set<string>()
+
+  if (identity.primaryAccount) {
+    keys.add(fallbackUserAccountKey(identity.primaryAccount))
+    keys.add(fallbackUserLegacyKey(identity.primaryAccount))
+  }
+  if (identity.emailOrUsername) {
+    keys.add(fallbackUserAccountKey(identity.emailOrUsername))
+    keys.add(fallbackUserLegacyKey(identity.emailOrUsername))
+  }
+  if (identity.username) keys.add(fallbackUsernameKey(identity.username))
+  if (identity.email) keys.add(fallbackEmailKey(identity.email))
+  keys.add(fallbackUserIdKey(user.id))
+
+  await redis.del([...keys])
 }
 
 async function clearSessionsForUser(userId: string) {
@@ -177,19 +334,26 @@ async function clearSessionsForUser(userId: string) {
   }
 }
 
+function toUserDocFromFallback(user: FallbackUser): UserDoc {
+  const identity = resolveUserIdentity(user)
+  return {
+    _id: user.id,
+    username: identity.username || undefined,
+    email: identity.email || undefined,
+    emailOrUsername: identity.emailOrUsername || undefined,
+    nickname: user.nickname,
+    passwordHash: user.passwordHash,
+    createdAt: new Date(user.createdAt),
+    lastLoginAt: new Date(user.lastLoginAt),
+  }
+}
+
 async function getUserDocById(userId: string): Promise<UserDoc | null> {
   await getDb()
   if (isUsingMemoryDb()) {
     const fallbackUser = await getFallbackUserById(userId)
     if (!fallbackUser) return null
-    return {
-      _id: fallbackUser.id,
-      emailOrUsername: fallbackUser.emailOrUsername,
-      nickname: fallbackUser.nickname,
-      passwordHash: fallbackUser.passwordHash,
-      createdAt: new Date(fallbackUser.createdAt),
-      lastLoginAt: new Date(fallbackUser.lastLoginAt),
-    }
+    return toUserDocFromFallback(fallbackUser)
   }
 
   const db = await getDb()
@@ -204,7 +368,12 @@ export async function isAdminUser(userId: string) {
 
   const user = await getUserDocById(userId)
   if (!user) return false
-  return adminUsernameSet.has(user.emailOrUsername.toLowerCase())
+
+  const identity = resolveUserIdentity(user)
+  const candidates = [identity.username, identity.emailOrUsername, identity.email]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+  return candidates.some((candidate) => adminUsernameSet.has(candidate))
 }
 
 export async function listManagedUsers(input?: { query?: string; limit?: number }): Promise<ManagedUser[]> {
@@ -216,8 +385,9 @@ export async function listManagedUsers(input?: { query?: string; limit?: number 
     const users = await listFallbackUsers()
     const filtered = query
       ? users.filter((user) => {
-          const fields = [user.id, user.emailOrUsername, user.nickname]
-          return fields.some((field) => field.toLowerCase().includes(query))
+          const identity = resolveUserIdentity(user)
+          const fields = [user.id, identity.username, identity.email, identity.emailOrUsername, user.nickname]
+          return fields.some((field) => String(field ?? '').toLowerCase().includes(query))
         })
       : users
 
@@ -233,6 +403,8 @@ export async function listManagedUsers(input?: { query?: string; limit?: number 
     ? {
         $or: [
           { _id: { $regex: escapeRegex(query), $options: 'i' } },
+          { username: { $regex: escapeRegex(query), $options: 'i' } },
+          { email: { $regex: escapeRegex(query), $options: 'i' } },
           { emailOrUsername: { $regex: escapeRegex(query), $options: 'i' } },
           { nickname: { $regex: escapeRegex(query), $options: 'i' } },
         ],
@@ -294,14 +466,23 @@ export async function deleteManagedUser(userId: string) {
 }
 
 export async function registerUser(input: {
-  emailOrUsername: string
+  username: string
+  email: string
   password: string
   nickname: string
 }) {
+  const username = normalizeUsername(input.username)
+  const email = normalizeEmail(input.email)
+  const nickname = input.nickname.trim()
+  if (!username) throw new Error('USERNAME_REQUIRED')
+  if (!email) throw new Error('EMAIL_REQUIRED')
+
   await getDb()
   if (isUsingMemoryDb()) {
-    const exists = await getFallbackUserByAccount(input.emailOrUsername)
-    if (exists) throw new Error('账号已存在')
+    const usernameExists = await getFallbackUserByLookup(username)
+    if (usernameExists) throw new Error('账号已存在')
+    const emailExists = await getFallbackUserByLookup(email)
+    if (emailExists) throw new Error('账号已存在')
 
     const passwordHash = await bcrypt.hash(input.password, 10)
     const nowIso = new Date().toISOString()
@@ -309,20 +490,22 @@ export async function registerUser(input: {
 
     await saveFallbackUser({
       id: userId,
-      emailOrUsername: input.emailOrUsername,
-      nickname: input.nickname,
+      username,
+      email,
+      emailOrUsername: username,
+      nickname,
       passwordHash,
       createdAt: nowIso,
       lastLoginAt: nowIso,
     })
 
-    return { id: userId, nickname: input.nickname }
+    return { id: userId, nickname }
   }
 
   const db = await getDb()
   const users = db.collection<UserDoc>('users')
 
-  const exists = await users.findOne({ emailOrUsername: input.emailOrUsername })
+  const exists = await users.findOne(buildMongoIdentityExistsFilter(username, email) as any)
   if (exists) throw new Error('账号已存在')
 
   const passwordHash = await bcrypt.hash(input.password, 10)
@@ -331,20 +514,25 @@ export async function registerUser(input: {
 
   await users.insertOne({
     _id: userId,
-    emailOrUsername: input.emailOrUsername,
-    nickname: input.nickname,
+    username,
+    email,
+    emailOrUsername: username,
+    nickname,
     passwordHash,
     createdAt: now,
     lastLoginAt: now,
   })
 
-  return { id: userId, nickname: input.nickname }
+  return { id: userId, nickname }
 }
 
 export async function loginUser(input: { emailOrUsername: string; password: string }) {
+  const account = input.emailOrUsername.trim()
+  if (!account) throw new Error('账号或密码错误')
+
   await getDb()
   if (isUsingMemoryDb()) {
-    const user = await getFallbackUserByAccount(input.emailOrUsername)
+    const user = await getFallbackUserByLookup(account)
     if (!user) throw new Error('账号或密码错误')
 
     const ok = await bcrypt.compare(input.password, user.passwordHash)
@@ -366,14 +554,8 @@ export async function loginUser(input: { emailOrUsername: string; password: stri
 
   const db = await getDb()
   const users = db.collection<UserDoc>('users')
-
-  const user = await users.findOne({
-    emailOrUsername: input.emailOrUsername,
-  })
-
-  if (!user) {
-    throw new Error('账号或密码错误')
-  }
+  const user = await users.findOne(buildMongoAccountFilter(account) as any)
+  if (!user) throw new Error('账号或密码错误')
 
   const ok = await bcrypt.compare(input.password, user.passwordHash)
   if (!ok) throw new Error('账号或密码错误')
@@ -389,6 +571,52 @@ export async function loginUser(input: { emailOrUsername: string; password: stri
   })
 
   return { accessToken: token, user: { id: user._id, nickname: user.nickname, isGuest: false as const } }
+}
+
+export async function isEmailRegistered(rawEmail: string) {
+  const email = normalizeEmail(rawEmail)
+  if (!email) return false
+
+  await getDb()
+  if (isUsingMemoryDb()) {
+    const user = await getFallbackUserByEmail(email)
+    return !!user
+  }
+
+  const db = await getDb()
+  const users = db.collection<UserDoc>('users')
+  const user = await users.findOne(buildMongoEmailIdentityFilter(email) as any, {
+    projection: { _id: 1 },
+  })
+  return !!user
+}
+
+export async function resetPasswordByEmail(input: { email: string; newPassword: string }) {
+  const email = normalizeEmail(input.email)
+  if (!email) throw new Error('EMAIL_REQUIRED')
+  if (!input.newPassword || input.newPassword.length < 6) throw new Error('INVALID_INPUT')
+
+  await getDb()
+  if (isUsingMemoryDb()) {
+    const user = await getFallbackUserByEmail(email)
+    if (!user) throw new Error('EMAIL_NOT_FOUND')
+
+    user.passwordHash = await bcrypt.hash(input.newPassword, 10)
+    await saveFallbackUser(user)
+    await clearSessionsForUser(user.id)
+    return
+  }
+
+  const db = await getDb()
+  const users = db.collection<UserDoc>('users')
+  const user = await users.findOne(buildMongoEmailIdentityFilter(email) as any, {
+    projection: { _id: 1 },
+  })
+  if (!user) throw new Error('EMAIL_NOT_FOUND')
+
+  const passwordHash = await bcrypt.hash(input.newPassword, 10)
+  await users.updateOne({ _id: user._id }, { $set: { passwordHash } })
+  await clearSessionsForUser(user._id)
 }
 
 export async function guestLogin(input?: { nickname?: string }) {
@@ -409,7 +637,8 @@ export async function guestLogin(input?: { nickname?: string }) {
 
 export async function upgradeGuestToUser(input: {
   token: string
-  emailOrUsername: string
+  username: string
+  email: string
   password: string
   nickname?: string
 }) {
@@ -417,10 +646,17 @@ export async function upgradeGuestToUser(input: {
   const parsed = jwtPayloadSchema.parse(decoded)
   if (!parsed.sub.startsWith('guest:')) throw new Error('NOT_GUEST')
 
+  const username = normalizeUsername(input.username)
+  const email = normalizeEmail(input.email)
+  if (!username) throw new Error('USERNAME_REQUIRED')
+  if (!email) throw new Error('EMAIL_REQUIRED')
+
   await getDb()
   if (isUsingMemoryDb()) {
-    const exists = await getFallbackUserByAccount(input.emailOrUsername)
-    if (exists) throw new Error('账号已存在')
+    const usernameExists = await getFallbackUserByLookup(username)
+    if (usernameExists) throw new Error('账号已存在')
+    const emailExists = await getFallbackUserByLookup(email)
+    if (emailExists) throw new Error('账号已存在')
 
     const nickname = (input.nickname?.trim() || parsed.nickname).slice(0, 20)
     const passwordHash = await bcrypt.hash(input.password, 10)
@@ -429,7 +665,9 @@ export async function upgradeGuestToUser(input: {
 
     await saveFallbackUser({
       id: userId,
-      emailOrUsername: input.emailOrUsername,
+      username,
+      email,
+      emailOrUsername: username,
       nickname,
       passwordHash,
       createdAt: nowIso,
@@ -451,8 +689,7 @@ export async function upgradeGuestToUser(input: {
 
   const db = await getDb()
   const users = db.collection<UserDoc>('users')
-
-  const exists = await users.findOne({ emailOrUsername: input.emailOrUsername })
+  const exists = await users.findOne(buildMongoIdentityExistsFilter(username, email) as any)
   if (exists) throw new Error('账号已存在')
 
   const nickname = (input.nickname?.trim() || parsed.nickname).slice(0, 20)
@@ -462,7 +699,9 @@ export async function upgradeGuestToUser(input: {
 
   await users.insertOne({
     _id: userId,
-    emailOrUsername: input.emailOrUsername,
+    username,
+    email,
+    emailOrUsername: username,
     nickname,
     passwordHash,
     createdAt: now,
